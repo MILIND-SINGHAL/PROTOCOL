@@ -1,0 +1,214 @@
+================================================================================
+                       PROTOCOL - EXECUTIVE WELLNESS OS
+       Official Hackathon (Ship-a-thon) Submission & App Store Listing Data
+================================================================================
+
+TABLE OF CONTENTS
+1. Basic App Information & Identity
+2. Hackathon (Ship-a-thon) Submission Kit
+   - Project Title & Tagline
+   - Inspiration & Problem Statement
+   - What It Does & Core Features
+   - How We Built It (Tech Stack)
+   - RevenueCat Monetization & Paywall Integration
+   - Auditor & Testing Instructions (Google Play License Testing)
+   - 2-Minute Demo Video Script & Outline
+3. App Store & Google Play / Samsung Galaxy Store Metadata
+   - Title & Subtitle
+   - Short Description (80 chars)
+   - Full Store Description (Formatted for copy-paste)
+   - Keywords / Tags
+   - Category & Content Rating
+   - Data Safety & Privacy Policy Summary
+4. RevenueCat Technical Configuration
+   - Entitlements, Packages, Offerings
+   - A/B Testing Experiment Setup
+   - Safe Local Fallback & Sandbox Mode
+5. Security & Architecture Overview
+
+================================================================================
+1. BASIC APP INFORMATION & IDENTITY
+================================================================================
+App Name:            Protocol
+Full Title:          Protocol - Executive Circadian & Focus OS
+Application ID:      com.aistudio.protocol.wellness
+Version Code:        1
+Version Name:        1.0
+Platform:            Android (Jetpack Compose, Material Design 3)
+Primary Category:    Health & Fitness
+Secondary Category:  Productivity
+Supported Stores:    Google Play Store, Samsung Galaxy Store, Direct Distribution
+Target Audience:     Professionals, biohackers, executives, and high-performers
+
+================================================================================
+2. HACKATHON (SHIP-A-THON) SUBMISSION KIT
+================================================================================
+
+[PROJECT TITLE]
+Protocol - Executive Circadian Wellness & Focus OS
+
+[TAGLINE] (Under 60 chars)
+Synchronize your day with science-backed circadian protocols.
+
+[INSPIRATION]
+In today’s hyper-connected, high-stress knowledge economy, executives and
+creators struggle with irregular sleep cycles, erratic caffeine crashes,
+and chronic cognitive fatigue. While many apps track sleep passively, they
+rarely provide an actionable, real-time operating system that guides your
+biology from the moment you wake up to the moment you power down. We built
+Protocol to transform circadian neurobiology (morning sunlight anchoring,
+caffeine cut-off countdowns, physiological sigh reset, and evening melatonin
+preservation) into a sleek, gamified executive daily routine.
+
+[WHAT IT DOES]
+Protocol anchors your daily schedule to your personal wake-up baseline and
+dynamically adjusts 4 core daily tracks:
+1. Track 1: Morning Sunlight & Hydration (Cortisol awakening reset)
+2. Track 2: Peak Cognitive Deep Work (Dopamine and focus synchronization)
+3. Track 3: Afternoon Recalibration & Caffeine Cut-Off (Adenosine management)
+4. Track 4: Evening Melatonin Defense & Wind-Down (Blue light & nervous system)
+
+Additional features include:
+- Interactive Breath Pacer: Guided Box Breathing (4-4-4-4) and Physiological
+  Sigh (double inhale, long exhale) with real-time audio and haptic feedback.
+- Binaural Focus Soundscapes: Pink noise, Theta waves, and ambient focus loops.
+- Habit Streaks & Daily Adherence: Local Room database tracking lifetime
+  streaks and daily protocol completion.
+- Push Reminders: Timed OneSignal reminders for morning sunlight and evening
+  screen shut-off.
+
+[HOW WE BUILT IT]
+- Framework: 100% Modern Kotlin & Jetpack Compose.
+- UI Design: Material Design 3 with custom dark/light adaptive color palettes,
+  smooth spring animations, and high-contrast typographic hierarchy.
+- State & Architecture: MVVM architecture with Kotlin Coroutines, StateFlow,
+  and reactive State management.
+- Data Persistence: Jetpack Room SQLite database with full offline-first
+  capabilities.
+- Monetization: RevenueCat Android SDK (v8.12.3) managing subscriptions,
+  paywalls, and remote entitlement synchronization.
+- Notifications: OneSignal Android SDK for circadian event scheduling.
+- Integrity: Custom SecurityIntegrityManager with zero-client admin attack
+  surface and tamper-detection safeguards.
+
+[REVENUECAT MONETIZATION & PAYWALL INTEGRATION]
+RevenueCat powers the entire commercial layer of Protocol:
+- Gated Entitlement: `pro` entitlement unlocks Tracks 2-4, custom circadian
+  wake-up offsets, unlimited breathwork soundscapes, and advanced analytics.
+- Dual-Offering Architecture:
+  * Annual VIP Protocol: $39.99/year with a 7-day free trial ($3.33/month).
+  * Weekly Accelerate Pass: $6.99/week for rapid sprints.
+- Remote Experimentation / A/B Testing: Built-in support for remote RevenueCat
+  Offerings (`standard` vs `shipaton_experiment_offer`), toggleable directly
+  in Settings > Advanced Billing Diagnostics.
+- Resilient Fallback Engine: If network or Google Play Billing is temporarily
+  unavailable, the app uses an internal cached catalog and local sandbox,
+  preventing paywall crashes or blocking user experience.
+
+[INSTRUCTIONS FOR AUDITORS & TESTERS (GOOGLE PLAY LICENSE TESTING)]
+Subscription testing is verified through Google Play Billing & RevenueCat:
+- Google Play License Testers: Add tester email in Google Play Console & RevenueCat
+  Dashboard to test test-purchases without credit card charges.
+- Debug Builds: Demo mode can only be enabled in dedicated debug builds via
+  BuildConfig.DEMO_MODE, and is strictly disabled and excluded from release.
+- Entitlement Authority: Entitlements are verified directly against RevenueCat
+  customerInfo.entitlements["pro"].isActive, ensuring genuine authorization.
+
+[2-MINUTE DEMO VIDEO SCRIPT & OUTLINE]
+0:00 - 0:20: The Problem
+  "Knowledge workers struggle with energy crashes and sleep disruption. Meet
+  Protocol, the executive circadian operating system."
+0:20 - 0:45: Setting Baseline & Dashboard
+  "Show the user setting their wake time (e.g. 7:00 AM). The app calculates
+  optimal cortisol peak, caffeine cutoff, and melatonin window in real-time."
+0:45 - 1:15: Interactive Breathwork & Focus
+  "Demonstrate the interactive Physiological Sigh breath pacer with soothing
+  haptics, binaural soundscapes, and daily streak tracking."
+1:15 - 1:40: The RevenueCat Paywall & Subscription Flow
+  "Open the subscription screen. Highlight the 7-day trial timeline, transparent
+  pricing terms, and tap Subscribe to show smooth entitlement unlocking."
+1:40 - 2:00: Subscription Verification & Conclusion
+  "Show the settings menu with RevenueCat sync and entitlement status.
+  Protocol makes circadian wellness seamless, powered by RevenueCat."
+
+================================================================================
+3. STORE LISTING METADATA (GOOGLE PLAY & SAMSUNG GALAXY STORE)
+================================================================================
+
+[TITLE]
+Protocol - Circadian Focus OS
+
+[SUBTITLE / SHORT DESCRIPTION] (Under 80 chars)
+Executive circadian wellness, daily focus protocols, and guided breath pacer.
+
+[FULL STORE DESCRIPTION]
+Synchronize your energy, focus, and recovery with Protocol — the executive
+circadian wellness operating system designed for high performers, creators,
+and biohackers.
+
+Rooted in peer-reviewed chronobiology, Protocol anchors your daily schedule
+around your biological clock rather than a rigid calendar.
+
+KEY FEATURES:
+
+◆ CIRCADIAN TIMELINE ENGINE
+Set your natural wake time and let Protocol calculate your exact biological
+windows for peak cortisol, optimal deep work, caffeine clearance, and
+melatonin release.
+
+◆ 4 CORE DAILY PROTOCOLS
+- Track 1: Morning Sunlight & Hydration (Anchors circadian rhythm)
+- Track 2: Peak Cognitive Deep Work (Optimized dopamine & focus intervals)
+- Track 3: Caffeine Cut-Off Countdown (Clears adenosine before bedtime)
+- Track 4: Evening Melatonin Defense (Prepares parasympathetic nervous system)
+
+◆ GUIDED BREATHWORK & NERVOUS SYSTEM REGULATION
+- Box Breathing (4-4-4-4) for immediate stress reduction and mental clarity.
+- Physiological Sigh (double inhale, long exhale) to halt acute anxiety.
+- Integrated haptic feedback and ambient soundscapes (Pink noise, Theta waves).
+
+◆ SEAMLESS HABIT TRACKING
+Build lasting consistency with streak monitoring, daily adherence scoring,
+and timely push notifications before critical circadian milestones.
+
+◆ REVENUECAT POWERED MEMBERSHIP
+Unlock all 4 protocol tracks, custom circadian baseline offsets, and
+unlimited focus soundscapes with Protocol Pro. Includes a 7-day free trial.
+
+Take control of your biology. Download Protocol today.
+
+[KEYWORDS / SEARCH TAGS]
+circadian rhythm, biohacking, focus timer, breathwork, box breathing,
+productivity, sleep tracker, habit tracker, caffeine tracker, wellness
+
+[TARGET AUDIENCE & CONTENT RATING]
+- Content Rating: Everyone / PEGI 3
+- Target Age: 18+ (Productivity / Health)
+
+================================================================================
+4. REVENUECAT TECHNICAL CONFIGURATION
+================================================================================
+- RevenueCat Project ID:   projf4beb188
+- RevenueCat Android App:  app8c346dcd71
+- Entitlement ID:          pro
+- Active Products:
+  * Annual Subscription:   rc_annual ($39.99/year with 7-day free trial)
+  * Weekly Subscription:   rc_weekly ($6.99/week)
+- Offerings Configured:
+  * standard:              Default offering with Annual & Weekly tiers
+  * shipaton_experiment:   Promotional offering for A/B testing evaluation
+- SDK Dependency:          com.revenuecat.purchases:purchases:8.12.3
+
+================================================================================
+5. SECURITY & ARCHITECTURE HIGHLIGHTS
+================================================================================
+- Zero-Client Admin Footprint: Eliminated all client-side admin privileges to
+  guarantee complete resistance against APK patching and smali tampering.
+- SecurityIntegrityManager: Validates runtime package integrity, detect hooks
+  (Frida, Xposed), and ensures sandbox safety.
+- Offline-First Resilience: StateFlow and Room database guarantee instant UI
+  responsiveness even with zero network connectivity.
+
+================================================================================
+Generated for Ship-a-thon 2026 Submission & Store Release.
+================================================================================

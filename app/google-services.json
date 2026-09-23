@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "415997460894",
+    "project_id": "protocol-welness",
+    "storage_bucket": "protocol-welness.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:415997460894:android:dc9de24046b0c52942168f",
+        "android_client_info": {
+          "package_name": "com.aistudio.protocol.wellness"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAPH_ec4NHVbTNoR7PqLQCJvKmMwpkZyX0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
