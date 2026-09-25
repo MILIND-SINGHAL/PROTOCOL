@@ -81,10 +81,10 @@ class MainActivity : ComponentActivity() {
                                 PaywallScreen(
                                     viewModel = viewModel,
                                     onSubscribed = {
-                                        viewModel.setNavDestination("dashboard")
+                                        viewModel.resolveStartupDestination(allowGuest = true)
                                     },
                                     onDismiss = {
-                                        viewModel.setNavDestination("dashboard")
+                                        viewModel.handlePaywallDismiss()
                                     }
                                 )
                             }

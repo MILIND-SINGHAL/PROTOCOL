@@ -3,6 +3,7 @@ package com.example.ui.screens
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -86,6 +87,14 @@ fun PaywallScreen(
     onSubscribed: () -> Unit,
     onDismiss: (() -> Unit)? = null
 ) {
+    BackHandler {
+        if (onDismiss != null) {
+            onDismiss()
+        } else {
+            viewModel.handlePaywallDismiss()
+        }
+    }
+
     val palette = ProtocolTheme.palette
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
@@ -93,6 +102,25 @@ fun PaywallScreen(
     val isPurchasing by viewModel.revenueCatManager.isPurchasing.collectAsState()
     val errorMsg by viewModel.revenueCatManager.lastError.collectAsState()
     val activeOfferingId by viewModel.revenueCatManager.activeOfferingId.collectAsState()
+    val remoteOfferings by viewModel.revenueCatManager.remoteOfferings.collectAsState()
+
+    // Plan package IDs and store pricing
+    val annualPackageId = if (activeOfferingId == "shipaton_experiment_offer" && viewModel.revenueCatManager.findExactPackage("\$rc_annual_promo") != null) {
+        "\$rc_annual_promo"
+    } else {
+        "\$rc_annual"
+    }
+    val weeklyPackageId = "\$rc_weekly"
+
+    val annualPrice = viewModel.revenueCatManager.getFormattedPrice(annualPackageId)
+    val weeklyPrice = viewModel.revenueCatManager.getFormattedPrice(weeklyPackageId)
+
+    val annualMonthlyPrice = viewModel.revenueCatManager.getFormattedPricePerMonth(annualPackageId)
+    val annualSub = if (activeOfferingId == "shipaton_experiment_offer") {
+        if (annualMonthlyPrice != null) "Executive tier ($annualMonthlyPrice/mo)" else "Executive tier"
+    } else {
+        if (annualMonthlyPrice != null) "Includes 4-day free trial ($annualMonthlyPrice/mo)" else "Includes 4-day free trial"
+    }
 
     var selectedPlan by remember { mutableStateOf("annual") } // "annual" or "weekly"
     var showComparisonMatrix by remember { mutableStateOf(false) }
@@ -383,8 +411,6 @@ fun PaywallScreen(
             Spacer(modifier = Modifier.height(24.dp))
 
             // Plan A: Annual
-            val annualPrice = if (activeOfferingId == "shipaton_experiment_offer") "$29.99" else "$39.99"
-            val annualSub = if (activeOfferingId == "shipaton_experiment_offer") "Executive tier ($2.49/mo)" else "Includes 4-day free trial ($3.33/mo)"
             PlanCard(
                 title = if (activeOfferingId == "shipaton_experiment_offer") "Executive Annual" else "Annual Protocol",
                 subtitle = annualSub,
@@ -404,7 +430,7 @@ fun PaywallScreen(
             PlanCard(
                 title = "Weekly protocol",
                 subtitle = "Flexible, cancel anytime",
-                price = "$6.99",
+                price = weeklyPrice,
                 frequency = "per week",
                 badgeText = null,
                 isSelected = selectedPlan == "weekly",
@@ -571,15 +597,24 @@ fun PaywallScreen(
                 .padding(horizontal = horizontalPadding, vertical = 10.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            val selectedPackageId = if (selectedPlan == "annual") annualPackageId else weeklyPackageId
+            val selectedPrice = if (selectedPlan == "annual") annualPrice else weeklyPrice
+            val isPriceLoading = selectedPrice == "Loading price…"
+            val isPackageUnavailable = selectedPrice == "Unavailable"
+
             ProtocolPrimaryButton(
                 text = if (isPurchasing) {
                     "Confirming..."
+                } else if (isPriceLoading) {
+                    "Loading price…"
+                } else if (isPackageUnavailable) {
+                    "Unavailable"
                 } else if (selectedPlan == "annual") {
                     "Start 4-Day Free Trial"
                 } else {
                     "Subscribe"
                 },
-                enabled = !isPurchasing,
+                enabled = !isPurchasing && !isPriceLoading && !isPackageUnavailable,
                 onClick = {
                     val email = userProfile?.email?.trim().orEmpty()
                     if (email.isEmpty() || !email.contains("@")) {
@@ -598,7 +633,7 @@ fun PaywallScreen(
                         return@ProtocolPrimaryButton
                     }
 
-                    val packageId = if (selectedPlan == "annual") "\$rc_annual" else "\$rc_weekly"
+                    val packageId = selectedPackageId
                     viewModel.purchasePlan(activity = activity, packageId = packageId, onSuccess = onSubscribed)
                 },
                 trailingIcon = {
@@ -816,7 +851,7 @@ private fun PlanCard(
                     Text(
                         text = price,
                         color = palette.foreground,
-                        fontSize = 17.sp,
+                        fontSize = if (price.length > 9) 13.sp else 17.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Spacer(modifier = Modifier.height(2.dp))
@@ -1123,7 +1158,7 @@ private fun PaywallAuthGateDialog(
                                 nameInput = name.ifBlank { "User" },
                                 onResult = { status, msg ->
                                     isSubmitting = false
-                                    if (status != FirebaseSyncStatus.ERROR) {
+                                    if (status == FirebaseSyncStatus.REAL_SUCCESS) {
                                         onSuccess(cleanEmail)
                                     } else {
                                         errorMessage = msg
@@ -1136,7 +1171,7 @@ private fun PaywallAuthGateDialog(
                                 passwordInput = cleanPass,
                                 onResult = { status, msg ->
                                     isSubmitting = false
-                                    if (status != FirebaseSyncStatus.ERROR) {
+                                    if (status == FirebaseSyncStatus.REAL_SUCCESS) {
                                         onSuccess(cleanEmail)
                                     } else {
                                         errorMessage = msg

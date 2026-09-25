@@ -53,13 +53,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.components.GoogleAccountPickerDialog
+import com.example.data.firebase.FirebaseSyncStatus
 import com.example.ui.components.GoogleLogoIcon
 import com.example.ui.components.GoogleSignInButton
 import com.example.ui.components.triggerHaptic
 import com.example.ui.theme.ProtocolTheme
 import com.example.ui.theme.ThemeMode
 import com.example.viewmodel.ProtocolViewModel
+import com.example.viewmodel.UserSessionState
 
 @Composable
 fun AccountScreenContent(
@@ -74,30 +75,19 @@ fun AccountScreenContent(
     val palette = ProtocolTheme.palette
     val context = LocalContext.current
     val userProfile by viewModel.userProfile.collectAsState()
+    val sessionState by viewModel.sessionState.collectAsState()
 
-    var showGooglePicker by remember { mutableStateOf(false) }
+    var isGoogleLoading by remember { mutableStateOf(false) }
 
+    val isAuthenticated = sessionState == UserSessionState.AUTHENTICATED
     val userEmail = userProfile?.email
-    val isAuthenticated = !userEmail.isNullOrBlank()
-    val isGoogleUser = userEmail?.endsWith("@gmail.com", ignoreCase = true) == true
-    val userName = if (!userEmail.isNullOrBlank()) {
+    val isGoogleUser = isAuthenticated && userEmail?.endsWith("@gmail.com", ignoreCase = true) == true
+    val userName = if (!userProfile?.displayName.isNullOrBlank()) {
+        userProfile?.displayName ?: "Protocol Member"
+    } else if (!userEmail.isNullOrBlank()) {
         userEmail.substringBefore("@").replaceFirstChar { it.uppercase() }
     } else {
         "Protocol Member"
-    }
-
-    if (showGooglePicker) {
-        GoogleAccountPickerDialog(
-            defaultEmail = userEmail,
-            defaultName = if (isAuthenticated) userName else null,
-            onAccountSelected = { email, name ->
-                showGooglePicker = false
-                viewModel.signInWithGoogle(email, name) { _, _ ->
-                    triggerHaptic(context, 4)
-                }
-            },
-            onDismiss = { showGooglePicker = false }
-        )
     }
 
     Column(
@@ -387,9 +377,18 @@ fun AccountScreenContent(
                 GoogleSignInButton(
                     text = if (isAuthenticated) "Switch Google Account" else "Sign In with Google",
                     subtitle = "Google manages authentication & protects credentials",
+                    isLoading = isGoogleLoading,
                     onClick = {
                         triggerHaptic(context, 1)
-                        showGooglePicker = true
+                        isGoogleLoading = true
+                        viewModel.signInWithGoogle(context) { status, _ ->
+                            isGoogleLoading = false
+                            if (status == FirebaseSyncStatus.REAL_SUCCESS) {
+                                triggerHaptic(context, 4)
+                            } else {
+                                triggerHaptic(context, 5)
+                            }
+                        }
                     }
                 )
 

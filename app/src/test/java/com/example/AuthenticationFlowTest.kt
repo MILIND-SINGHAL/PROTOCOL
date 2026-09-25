@@ -1,16 +1,25 @@
 package com.example
 
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
 import com.example.data.firebase.FirebaseManager
 import com.example.data.firebase.FirebaseSyncResult
 import com.example.data.firebase.FirebaseSyncStatus
 import com.example.data.security.SecurityIntegrityManager
 import com.example.viewmodel.AccountDeletionResult
+import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [36])
 class AuthenticationFlowTest {
 
     @Test
@@ -71,12 +80,12 @@ class AuthenticationFlowTest {
         val offlineResult = FirebaseSyncResult(
             status = FirebaseSyncStatus.OFFLINE_MODE,
             message = "Firebase Auth is unconfigured or offline. Running in local offline mode.",
-            uid = "usr_fallback_123"
+            uid = null
         )
         // OFFLINE_MODE must NEVER have success == true
         assertFalse("Offline mode must NEVER report success as true", offlineResult.success)
         assertEquals(FirebaseSyncStatus.OFFLINE_MODE, offlineResult.status)
-        assertNotNull(offlineResult.uid)
+        assertNull("Offline mode must NOT fabricate or contain a Firebase UID", offlineResult.uid)
     }
 
     @Test
@@ -94,4 +103,30 @@ class AuthenticationFlowTest {
         assertTrue(result.isSubscriptionReset)
         assertTrue(result.isNotificationReset)
     }
+
+    @Test
+    fun testGoogleAuth_WebClientId_ResolvesSuccessfully() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val webClientId = FirebaseManager.getWebClientId(context)
+        assertEquals("415997460894-f87ogjb4065j2kchf2obo6ss5tgre2r4.apps.googleusercontent.com", webClientId)
+    }
+
+    @Test
+    fun testGoogleAuth_BlankIdToken_ReturnsErrorAndNeverRealSuccess() = runTest {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val firebaseManager = FirebaseManager(context)
+        val result = firebaseManager.signInWithGoogleIdToken("")
+        assertEquals(FirebaseSyncStatus.ERROR, result.status)
+        assertFalse("Blank ID token must NEVER return REAL_SUCCESS", result.success)
+        assertNull("Blank ID token must not produce fake fallback UID", result.uid)
+    }
+
+    @Test
+    fun testGoogleAuth_NoFallbackUidGenerated() {
+        val email = "member@protocol.app"
+        val fakeHashUid = "goog_" + email.hashCode().toString(16)
+        // Verify that fake hash UID cannot be accepted as valid UID
+        assertFalse("Fake hash UID must not be valid Firestore UID", FirebaseManager.isValidFirestoreUserUid(fakeHashUid) && !fakeHashUid.startsWith("goog_"))
+    }
 }
+

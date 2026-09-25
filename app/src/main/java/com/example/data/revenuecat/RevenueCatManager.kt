@@ -14,17 +14,20 @@ import com.revenuecat.purchases.interfaces.PurchaseCallback
 import com.revenuecat.purchases.interfaces.ReceiveCustomerInfoCallback
 import com.revenuecat.purchases.interfaces.ReceiveOfferingsCallback
 import com.revenuecat.purchases.interfaces.UpdatedCustomerInfoListener
+import com.revenuecat.purchases.interfaces.LogInCallback
 import com.revenuecat.purchases.models.StoreTransaction
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.text.NumberFormat
+import java.util.Currency
+import java.util.Locale
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
 data class RevenueCatPackage(
     val identifier: String,
     val title: String,
-    val priceString: String,
     val subtitle: String,
     val period: String,
     val hasTrial: Boolean = false,
@@ -88,16 +91,14 @@ class RevenueCatManager {
             RevenueCatPackage(
                 identifier = "\$rc_annual",
                 title = "Annual Protocol",
-                priceString = "$39.99",
                 subtitle = "Includes 4-day free trial",
-                period = "per year ($3.33/mo)",
+                period = "per year",
                 hasTrial = true,
                 trialDays = 4
             ),
             RevenueCatPackage(
                 identifier = "\$rc_weekly",
                 title = "Weekly Protocol",
-                priceString = "$6.99",
                 subtitle = "Flexible, cancel anytime",
                 period = "per week",
                 hasTrial = false
@@ -111,16 +112,14 @@ class RevenueCatManager {
             RevenueCatPackage(
                 identifier = "\$rc_annual_promo",
                 title = "Founder Edition (25% Off)",
-                priceString = "$29.99",
                 subtitle = "Special founder rate with 4-day trial",
-                period = "first year ($2.49/mo)",
+                period = "first year",
                 hasTrial = true,
                 trialDays = 4
             ),
             RevenueCatPackage(
                 identifier = "\$rc_weekly",
                 title = "Weekly Protocol",
-                priceString = "$6.99",
                 subtitle = "Standard weekly rate",
                 period = "per week",
                 hasTrial = false
@@ -229,6 +228,122 @@ class RevenueCatManager {
         _activeOfferingId.value = offeringId
     }
 
+    // Tracks the active RevenueCat customer identity
+    var currentAppUserId: String? = null
+        internal set
+
+    // Optional delegate hook allowing unit tests to simulate identity sync results
+    var identitySyncResolverForTesting: (suspend (String) -> CustomerInfo?)? = null
+
+    // Optional delegate hook allowing unit tests to simulate logout behavior
+    var logoutResolverForTesting: (suspend () -> Unit)? = null
+
+    /**
+     * Synchronizes RevenueCat customer identity with the canonical Firebase UID.
+     * Calls Purchases.sharedInstance.logIn(firebaseUid).
+     *
+     * Strict Identity Architecture:
+     * - RevenueCat identity MUST be FirebaseUser.uid.
+     * - Prohibited: email, display name, email hash, generated ID, timestamp, random UUID, "goog_" + email, device ID.
+     *
+     * Returns updated CustomerInfo if login succeeds, or null if login fails.
+     * Note: Identity login success does NOT grant Pro; Pro is strictly determined by authoritative CustomerInfo entitlement.
+     */
+    suspend fun syncRevenueCatIdentity(firebaseUid: String): CustomerInfo? {
+        val trimmedUid = firebaseUid.trim()
+        if (trimmedUid.isBlank()) {
+            Log.w(TAG, "Cannot sync empty or blank Firebase UID to RevenueCat.")
+            return null
+        }
+
+        // Validate that identity is not an email, email hash, or prohibited format
+        if (trimmedUid.contains("@") || trimmedUid.contains(".")) {
+            Log.w(TAG, "Invalid RevenueCat identity: email format rejected. Must be Firebase UID.")
+            return null
+        }
+        if (trimmedUid.startsWith("goog_")) {
+            Log.w(TAG, "Invalid RevenueCat identity: 'goog_' prefix rejected. Must be Firebase UID.")
+            return null
+        }
+
+        currentAppUserId = trimmedUid
+
+        // Test hook for unit testing
+        identitySyncResolverForTesting?.let { testResolver ->
+            val info = testResolver.invoke(trimmedUid)
+            if (info != null) {
+                _latestCustomerInfo.value = info
+                onCustomerInfoUpdated?.invoke(info)
+            } else {
+                _latestCustomerInfo.value = null
+            }
+            return info
+        }
+
+        if (!Purchases.isConfigured || !_isLiveConnected.value) {
+            Log.d(TAG, "RevenueCat unconfigured or disconnected. Recorded customer identity: $trimmedUid")
+            return null
+        }
+
+        return suspendCoroutine { cont ->
+            Purchases.sharedInstance.logIn(trimmedUid, object : LogInCallback {
+                override fun onReceived(customerInfo: CustomerInfo, created: Boolean) {
+                    Log.d(TAG, "RevenueCat logIn success for UID: $trimmedUid, created: $created")
+                    _latestCustomerInfo.value = customerInfo
+                    onCustomerInfoUpdated?.invoke(customerInfo)
+                    cont.resume(customerInfo)
+                }
+
+                override fun onError(error: PurchasesError) {
+                    Log.w(TAG, "RevenueCat logIn failed for UID: $trimmedUid: ${error.message}")
+                    cont.resume(null)
+                }
+            })
+        }
+    }
+
+    // Delegate hook allowing unit tests to simulate authoritative entitlement results (active, inactive, error)
+    var entitlementResolverForTesting: (suspend () -> Boolean?)? = null
+
+    /**
+     * Authoritative subscription verification.
+     * Obtains current RevenueCat CustomerInfo and determines:
+     * customerInfo.entitlements["pro"]?.isActive == true
+     *
+     * Returns true if "pro" entitlement is verified active.
+     * Returns false if inactive, expired, network failure, or unconfigured.
+     * NEVER returns true on error or fallback.
+     */
+    suspend fun getAuthoritativeProEntitlement(): Boolean {
+        // Test delegate hook
+        entitlementResolverForTesting?.let { testResolver ->
+            val result = testResolver.invoke()
+            if (result != null) return result
+        }
+
+        if (!Purchases.isConfigured || !_isLiveConnected.value) {
+            val cachedInfo = _latestCustomerInfo.value
+            return cachedInfo?.entitlements?.get(ENTITLEMENT_ID)?.isActive == true
+        }
+
+        return suspendCoroutine { cont ->
+            Purchases.sharedInstance.getCustomerInfo(object : ReceiveCustomerInfoCallback {
+                override fun onReceived(customerInfo: CustomerInfo) {
+                    _latestCustomerInfo.value = customerInfo
+                    onCustomerInfoUpdated?.invoke(customerInfo)
+                    val isEntitled = customerInfo.entitlements[ENTITLEMENT_ID]?.isActive == true
+                    cont.resume(isEntitled)
+                }
+
+                override fun onError(error: PurchasesError) {
+                    Log.w(TAG, "Error fetching authoritative CustomerInfo: ${error.message}")
+                    // Conservative safety: verification/network errors must NEVER grant Pro access
+                    cont.resume(false)
+                }
+            })
+        }
+    }
+
     fun refreshCustomerInfo(onComplete: ((CustomerInfo?) -> Unit)? = null) {
         if (!Purchases.isConfigured || !_isLiveConnected.value) {
             onComplete?.invoke(null)
@@ -252,14 +367,114 @@ class RevenueCatManager {
         return purchasePackage(activity, "\$rc_annual_retention_discount")
     }
 
+    // Optional delegate hook allowing unit tests to simulate purchase execution with exact package matching
+    var purchaseResolverForTesting: (suspend (String) -> PurchaseResult?)? = null
+
+    // Allows unit tests to provide mock remote offerings
+    fun setRemoteOfferingsForTesting(offerings: Offerings?) {
+        _remoteOfferings.value = offerings
+    }
+
+    private fun logD(tag: String, msg: String) {
+        try {
+            Log.d(tag, msg)
+        } catch (_: Throwable) {
+            println("$tag: $msg")
+        }
+    }
+
+    private fun logW(tag: String, msg: String, tr: Throwable? = null) {
+        try {
+            if (tr != null) Log.w(tag, msg, tr) else Log.w(tag, msg)
+        } catch (_: Throwable) {
+            System.err.println("$tag: $msg")
+        }
+    }
+
+    /**
+     * Resolves the exact package matching packageId or productId from remote offerings.
+     * Strictly avoids fallbacks (such as availablePackages.firstOrNull()) to prevent
+     * silently charging the customer for a different package.
+     */
+    fun findExactPackage(packageId: String): com.revenuecat.purchases.Package? {
+        val offerings = _remoteOfferings.value ?: return null
+        val activeOffering = offerings.getOffering(_activeOfferingId.value)
+        return activeOffering?.availablePackages?.find {
+            it.identifier == packageId || it.product.id == packageId
+        } ?: offerings.current?.availablePackages?.find {
+            it.identifier == packageId || it.product.id == packageId
+        } ?: offerings.all.values.flatMap { it.availablePackages }.find {
+            it.identifier == packageId || it.product.id == packageId
+        }
+    }
+
+    /**
+     * Resolves the localized formatted price for a given packageId from remote offerings.
+     * Source of truth:
+     * RevenueCat Offering -> RevenueCat Package -> StoreProduct -> Store-provided formatted price.
+     *
+     * - If remote offerings have not loaded yet (null): returns "Loading price…"
+     * - If the requested package is unavailable: returns "Unavailable"
+     * - Otherwise returns the exact store-provided formatted price (e.g. "$39.99", "€39,99", "£34.99").
+     */
+    fun getFormattedPrice(packageId: String): String {
+        val offerings = _remoteOfferings.value ?: return "Loading price…"
+        val pkg = findExactPackage(packageId) ?: return "Unavailable"
+        return pkg.product.price.formatted
+    }
+
+    /**
+     * Calculates the localized formatted monthly price breakdown for an annual subscription package.
+     * Derived from StoreProduct.price without hardcoding currency or amount.
+     */
+    fun getFormattedPricePerMonth(packageId: String, locale: Locale = Locale.getDefault()): String? {
+        val pkg = findExactPackage(packageId) ?: return null
+        val price = pkg.product.price
+        return try {
+            val currency = Currency.getInstance(price.currencyCode)
+            val format = NumberFormat.getCurrencyInstance(locale).apply {
+                this.currency = currency
+                maximumFractionDigits = currency.defaultFractionDigits.coerceAtLeast(0)
+                minimumFractionDigits = currency.defaultFractionDigits.coerceAtLeast(0)
+            }
+            val monthlyAmount = (price.amountMicros / 12.0) / 1_000_000.0
+            format.format(monthlyAmount)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
     /**
      * Real Google Play & RevenueCat purchase execution.
      * Google Play -> RevenueCat -> Entitlement Active -> Room Cache -> UI.
      * Strictly avoids simulated delays and mock successes.
+     * Enforces exact package matching with zero fallback to other packages.
      */
     suspend fun purchasePackage(activity: Activity?, packageId: String): PurchaseResult {
         _isPurchasing.value = true
         _lastError.value = null
+
+        // Locate the exact package matching the requested package/product identifier
+        val pkgToBuy = findExactPackage(packageId)
+
+        // Test hook allowing unit tests to simulate purchase execution with the verified exact package
+        purchaseResolverForTesting?.let { testResolver ->
+            if (pkgToBuy == null) {
+                val errorMsg = "Selected subscription is currently unavailable."
+                logW(TAG, "Exact package '$packageId' not found in RevenueCat offerings. Unsafe fallback rejected: will NOT substitute another package.")
+                _lastError.value = errorMsg
+                _isPurchasing.value = false
+                return PurchaseResult.Error(errorMsg)
+            }
+            val result = testResolver.invoke(packageId)
+            if (result != null) {
+                if (result is PurchaseResult.Error) {
+                    _lastError.value = result.message
+                }
+                _isPurchasing.value = false
+                return result
+            }
+        }
 
         if (!Purchases.isConfigured || !_isLiveConnected.value) {
             val errorMsg = "Google Play Billing / RevenueCat is not configured. Real purchases require a valid Google Play RevenueCat API key (goog_...)."
@@ -268,22 +483,16 @@ class RevenueCatManager {
             return PurchaseResult.Error(errorMsg)
         }
 
-        if (activity == null) {
-            val errorMsg = "An active Activity context is required to launch Google Play billing flow."
+        if (pkgToBuy == null) {
+            val errorMsg = "Selected subscription is currently unavailable."
+            logW(TAG, "Exact package '$packageId' not found in RevenueCat offerings. Unsafe fallback rejected: will NOT substitute another package.")
             _lastError.value = errorMsg
             _isPurchasing.value = false
             return PurchaseResult.Error(errorMsg)
         }
 
-        val offerings = _remoteOfferings.value
-        val pkgToBuy = offerings?.current?.availablePackages?.find {
-            it.identifier == packageId || it.product.id == packageId
-        } ?: offerings?.all?.values?.flatMap { it.availablePackages }?.find {
-            it.identifier == packageId || it.product.id == packageId
-        } ?: offerings?.current?.availablePackages?.firstOrNull()
-
-        if (pkgToBuy == null) {
-            val errorMsg = "Offering or package '$packageId' not found in RevenueCat dashboard for Google Play."
+        if (activity == null) {
+            val errorMsg = "An active Activity context is required to launch Google Play billing flow."
             _lastError.value = errorMsg
             _isPurchasing.value = false
             return PurchaseResult.Error(errorMsg)
@@ -369,18 +578,26 @@ class RevenueCatManager {
      * Invoked during atomic account deletion.
      */
     suspend fun resetUserIdentity() {
+        currentAppUserId = null
         _latestCustomerInfo.value = null
         _lastError.value = null
+
+        logoutResolverForTesting?.let { testResolver ->
+            testResolver.invoke()
+            return
+        }
+
         if (Purchases.isConfigured && _isLiveConnected.value) {
             try {
                 suspendCoroutine<Unit> { cont ->
                     Purchases.sharedInstance.logOut(object : ReceiveCustomerInfoCallback {
                         override fun onReceived(customerInfo: CustomerInfo) {
-                            _latestCustomerInfo.value = customerInfo
+                            _latestCustomerInfo.value = null
                             cont.resume(Unit)
                         }
                         override fun onError(error: PurchasesError) {
                             Log.w(TAG, "RevenueCat logOut warning: ${error.message}")
+                            _latestCustomerInfo.value = null
                             cont.resume(Unit)
                         }
                     })

@@ -76,7 +76,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.firebase.FirebaseSyncStatus
-import com.example.ui.components.GoogleAccountPickerDialog
 import com.example.ui.components.GoogleSignInButton
 import com.example.ui.components.ProtocolLogoMark
 import com.example.ui.components.ProtocolPrimaryButton
@@ -107,7 +106,6 @@ fun AuthScreen(
     var feedbackMessage by remember { mutableStateOf<String?>(null) }
     var isFeedbackError by remember { mutableStateOf(false) }
 
-    var showGooglePicker by remember { mutableStateOf(false) }
     var showForgotPasswordDialog by remember { mutableStateOf(false) }
     var forgotPasswordEmail by remember { mutableStateOf("") }
     var forgotPasswordSent by remember { mutableStateOf(false) }
@@ -140,13 +138,13 @@ fun AuthScreen(
             ) { status, message ->
                 isLoading = false
                 feedbackMessage = message
-                if (status == FirebaseSyncStatus.ERROR) {
-                    isFeedbackError = true
-                    triggerHaptic(context, 5)
-                } else {
+                if (status == FirebaseSyncStatus.REAL_SUCCESS) {
                     isFeedbackError = false
                     triggerHaptic(context, 4)
                     onAuthSuccess()
+                } else {
+                    isFeedbackError = true
+                    triggerHaptic(context, 5)
                 }
             }
         } else {
@@ -156,44 +154,16 @@ fun AuthScreen(
             ) { status, message ->
                 isLoading = false
                 feedbackMessage = message
-                if (status == FirebaseSyncStatus.ERROR) {
-                    isFeedbackError = true
-                    triggerHaptic(context, 5)
-                } else {
+                if (status == FirebaseSyncStatus.REAL_SUCCESS) {
                     isFeedbackError = false
                     triggerHaptic(context, 4)
                     onAuthSuccess()
+                } else {
+                    isFeedbackError = true
+                    triggerHaptic(context, 5)
                 }
             }
         }
-    }
-
-    // Google Account Picker Dialog (One Tap Flow)
-    if (showGooglePicker) {
-        GoogleAccountPickerDialog(
-            defaultEmail = null,
-            defaultName = null,
-            onAccountSelected = { email, name ->
-                showGooglePicker = false
-                isGoogleLoading = true
-                viewModel.signInWithGoogle(
-                    googleEmail = email,
-                    googleName = name
-                ) { status, message ->
-                    isGoogleLoading = false
-                    feedbackMessage = message
-                    if (status == FirebaseSyncStatus.ERROR) {
-                        isFeedbackError = true
-                        triggerHaptic(context, 5)
-                    } else {
-                        isFeedbackError = false
-                        triggerHaptic(context, 4)
-                        onAuthSuccess()
-                    }
-                }
-            },
-            onDismiss = { showGooglePicker = false }
-        )
     }
 
     // Forgot Password Dialog
@@ -491,7 +461,21 @@ fun AuthScreen(
                 isLoading = isGoogleLoading,
                 onClick = {
                     triggerHaptic(context, 1)
-                    showGooglePicker = true
+                    isGoogleLoading = true
+                    feedbackMessage = null
+                    isFeedbackError = false
+                    viewModel.signInWithGoogle(context) { status, message ->
+                        isGoogleLoading = false
+                        feedbackMessage = message
+                        if (status == FirebaseSyncStatus.REAL_SUCCESS) {
+                            isFeedbackError = false
+                            triggerHaptic(context, 4)
+                            onAuthSuccess()
+                        } else {
+                            isFeedbackError = true
+                            triggerHaptic(context, 5)
+                        }
+                    }
                 }
             )
 

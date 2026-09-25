@@ -37,6 +37,7 @@
                 <action android:name="com.example.ACTION_SNOOZE_TASK" />
                 <action android:name="com.example.ACTION_START_TIMER" />
                 <action android:name="com.example.ACTION_LAUNCH_PACER" />
+                <action android:name="com.example.ACTION_DISMISS_TASK" />
             </intent-filter>
         </receiver>
     </application>

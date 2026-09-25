@@ -2,6 +2,7 @@ package com.example.viewmodel
 
 import android.app.Activity
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.BuildConfig
@@ -84,6 +85,7 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
     val firebaseManager = com.example.data.firebase.FirebaseManager(application)
 
     val userProfile: StateFlow<UserProfileEntity?>
+    val sessionState: StateFlow<UserSessionState>
     val todayCompleted: StateFlow<Set<String>>
     val notificationLogs: StateFlow<List<NotificationLogEntity>>
     val oneSignalSettings: StateFlow<OneSignalSettingsEntity?>
@@ -119,6 +121,25 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
 
         userProfile = repository.userProfileFlow
             .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+        sessionState = combine(
+            userProfile,
+            _isGuestSession
+        ) { profile, isGuest ->
+            val currentFirebaseUser = try { firebaseManager.currentUser } catch (_: Exception) { null }
+            val hasValidUid = profile?.firebaseUid != null &&
+                    !profile.firebaseUid.startsWith("usr_") &&
+                    profile.firebaseUid != "guest" &&
+                    profile.firebaseUid.isNotBlank()
+
+            if (currentFirebaseUser != null && hasValidUid) {
+                UserSessionState.AUTHENTICATED
+            } else if (isGuest) {
+                UserSessionState.OFFLINE_GUEST
+            } else {
+                UserSessionState.UNAUTHENTICATED
+            }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, UserSessionState.UNAUTHENTICATED)
 
         todayCompleted = repository.getCompletionsForTodayFlow()
             .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
@@ -293,8 +314,128 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    /**
+     * Synchronous check for cached display state in UI.
+     * Evaluates live RevenueCat entitlement if available, otherwise cached userProfile.
+     * Note: Strictly for UI rendering, NEVER for access decisions.
+     */
+    fun isProActive(): Boolean {
+        val revenueCatInfo = revenueCatManager.latestCustomerInfo.value
+        if (revenueCatInfo != null) {
+            return revenueCatInfo.entitlements[RevenueCatManager.ENTITLEMENT_ID]?.isActive == true
+        }
+        return userProfile.value?.isPro == true
+    }
+
+    /**
+     * Authoritative subscription verification.
+     * Consults RevenueCat / Google Play as the sole authority for the "pro" entitlement.
+     * Updates the local Room subscription cache ONLY after obtaining the RevenueCat result.
+     *
+     * Conservative safety: Verification/network failures NEVER grant Pro.
+     */
+    suspend fun getAuthoritativeProEntitlement(): Boolean {
+        val isEntitled = revenueCatManager.getAuthoritativeProEntitlement()
+
+        // Synchronize the local Room cache with the authoritative RevenueCat result
+        val profile = repository.getUserProfile()
+        if (profile != null) {
+            val targetPlan = if (isEntitled) {
+                revenueCatManager.latestCustomerInfo.value?.entitlements?.get(RevenueCatManager.ENTITLEMENT_ID)?.productIdentifier ?: "pro"
+            } else {
+                "free"
+            }
+            if (profile.isPro != isEntitled || (isEntitled && profile.subscriptionPlan == "free")) {
+                repository.setSubscription(isPro = isEntitled, plan = targetPlan)
+            }
+        }
+
+        return isEntitled
+    }
+
+    /**
+     * Backward-compatible alias for getAuthoritativeProEntitlement.
+     */
+    suspend fun isProEntitlementActive(): Boolean = getAuthoritativeProEntitlement()
+
+    /**
+     * Synchronizes RevenueCat customer identity with the canonical Firebase UID.
+     *
+     * Required Identity Architecture:
+     * Firebase Auth -> FirebaseUser.uid -> RevenueCat logIn(firebaseUid) -> RevenueCat CustomerInfo -> Pro entitlement
+     *
+     * The identity string MUST strictly be FirebaseUser.uid.
+     * Prohibited: email, display name, email hash, generated ID, timestamp, random UUID, "goog_" + email, device ID.
+     *
+     * Identity login success does NOT grant Pro. Pro is strictly determined by CustomerInfo entitlement.
+     * Explicitly handles RevenueCat identity login failures: does NOT grant Pro.
+     */
+    suspend fun syncRevenueCatIdentity(firebaseUid: String): Boolean {
+        if (firebaseUid.isBlank()) {
+            android.util.Log.w(RevenueCatManager.TAG, "Cannot sync empty or blank Firebase UID to RevenueCat.")
+            return false
+        }
+
+        val customerInfo = revenueCatManager.syncRevenueCatIdentity(firebaseUid)
+        if (customerInfo != null) {
+            val proEntitlement = customerInfo.entitlements[RevenueCatManager.ENTITLEMENT_ID]
+            val isProActive = proEntitlement?.isActive == true
+            val plan = if (isProActive) (proEntitlement?.productIdentifier ?: "pro") else "free"
+
+            repository.setSubscription(isPro = isProActive, plan = plan)
+            return true
+        } else {
+            android.util.Log.w(RevenueCatManager.TAG, "RevenueCat identity login failed for UID: $firebaseUid. Pro access NOT granted.")
+            // Explicit failure handling: Do NOT grant Pro. Ensure cache reflects unverified/free tier.
+            val profile = repository.getUserProfile()
+            if (profile != null && profile.isPro) {
+                repository.setSubscription(isPro = false, plan = "free")
+            }
+            return false
+        }
+    }
+
     fun setNavDestination(dest: String) {
+        if (dest == AppNavDestination.Dashboard.route || dest == "dashboard") {
+            viewModelScope.launch {
+                repository.ensureInitialized()
+                val profile = repository.getUserProfile()
+                val firebaseUser = firebaseManager.currentUser
+                val isSessionActive = firebaseUser != null || _isGuestSession.value
+
+                if (!isSessionActive) {
+                    _appNavState.value = AppNavDestination.Auth.route
+                    return@launch
+                }
+                if (profile == null || !profile.hasCompletedBaseline) {
+                    _appNavState.value = AppNavDestination.Baseline.route
+                    return@launch
+                }
+
+                // Authoritative check via RevenueCat CustomerInfo
+                val isPro = getAuthoritativeProEntitlement()
+                if (!isPro) {
+                    // Access Denied: User is not Pro. Enforce Paywall.
+                    _appNavState.value = AppNavDestination.Paywall.route
+                } else {
+                    _appNavState.value = AppNavDestination.Dashboard.route
+                }
+            }
+            return
+        }
         _appNavState.value = dest
+    }
+
+    fun handlePaywallDismiss() {
+        viewModelScope.launch {
+            repository.ensureInitialized()
+            val isPro = getAuthoritativeProEntitlement()
+            if (isPro) {
+                _appNavState.value = AppNavDestination.Dashboard.route
+            } else {
+                _appNavState.value = AppNavDestination.Paywall.route
+            }
+        }
     }
 
     /**
@@ -311,9 +452,9 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
      *     ├── No → Baseline
      *     └── Yes
      *           ↓
-     *   Active Pro Entitlement?
-     *     ├── No → Paywall
-     *     └── Yes → Dashboard
+     *   Refresh/obtain RevenueCat CustomerInfo authoritatively
+     *     ├── Inactive/Error → Paywall
+     *     └── Active → Dashboard
      */
     fun resolveStartupDestination(allowGuest: Boolean = false) {
         viewModelScope.launch {
@@ -321,7 +462,7 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
             val profile = repository.getUserProfile()
             val firebaseUser = firebaseManager.currentUser
 
-            // Keep Room cache synchronized with Firebase identity
+            // Keep Room cache synchronized with Firebase identity ONLY for real authenticated Firebase users
             if (firebaseUser != null && (profile?.firebaseUid != firebaseUser.uid || profile.email != firebaseUser.email || profile.isEmailVerified != firebaseUser.isEmailVerified)) {
                 repository.setActiveUserSession(
                     firebaseUid = firebaseUser.uid,
@@ -329,19 +470,32 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
                     displayName = firebaseUser.displayName,
                     isEmailVerified = firebaseUser.isEmailVerified
                 )
+            } else if (firebaseUser == null && profile?.firebaseUid != null) {
+                // Clear any legacy fabricated offline or orphaned UID
+                repository.clearActiveUserSession()
             }
 
-            // Firebase session is active if Firebase Auth currentUser != null, or guest mode was explicitly chosen
-            val isSessionActive = firebaseUser != null || allowGuest || _isGuestSession.value
+            // Immediately synchronize RevenueCat customer identity with the authenticated Firebase UID
+            if (firebaseUser != null) {
+                syncRevenueCatIdentity(firebaseUser.uid)
+            }
+
+            // Firebase session is active if real Firebase Auth currentUser != null, or guest mode was explicitly chosen
+            val hasRealAuthenticatedSession = firebaseUser != null && !profile?.firebaseUid.isNullOrBlank() && !profile.firebaseUid.startsWith("usr_")
+            val isSessionActive = hasRealAuthenticatedSession || allowGuest || _isGuestSession.value
 
             if (!isSessionActive) {
                 _appNavState.value = AppNavDestination.Auth.route
             } else if (profile == null || !profile.hasCompletedBaseline) {
                 _appNavState.value = AppNavDestination.Baseline.route
-            } else if (!profile.isPro) {
-                _appNavState.value = AppNavDestination.Paywall.route
             } else {
-                _appNavState.value = AppNavDestination.Dashboard.route
+                // Baseline complete: Verify RevenueCat CustomerInfo authoritatively
+                val isProActive = getAuthoritativeProEntitlement()
+                if (isProActive) {
+                    _appNavState.value = AppNavDestination.Dashboard.route
+                } else {
+                    _appNavState.value = AppNavDestination.Paywall.route
+                }
             }
         }
     }
@@ -406,7 +560,8 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
             val result = revenueCatManager.purchasePackage(activity, packageId)
             if (result is PurchaseResult.Success) {
                 // Room cache is kept strictly synchronized with RevenueCat entitlement status
-                _appNavState.value = "dashboard"
+                repository.setSubscription(isPro = true, plan = packageId)
+                resolveStartupDestination(allowGuest = true)
                 onSuccess()
             }
         }
@@ -417,7 +572,8 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
             val result = revenueCatManager.restorePurchases()
             if (result is PurchaseResult.Success) {
                 // Room cache is kept strictly synchronized with RevenueCat entitlement status
-                _appNavState.value = "dashboard"
+                repository.setSubscription(isPro = true, plan = "restored")
+                resolveStartupDestination(allowGuest = true)
                 onSuccess()
             }
         }
@@ -518,9 +674,9 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
                 null
             }
             val profile = userProfile.value
-            val canonicalUid = currentFirebaseUser?.uid ?: profile?.firebaseUid
+            val canonicalUid = currentFirebaseUser?.uid
 
-            if (canonicalUid.isNullOrBlank() || canonicalUid.startsWith("usr_") || canonicalUid.startsWith("goog_") || canonicalUid == "guest") {
+            if (currentFirebaseUser == null || canonicalUid.isNullOrBlank() || canonicalUid.startsWith("usr_") || canonicalUid == "guest") {
                 onResult(
                     FirebaseSyncStatus.OFFLINE_MODE,
                     "Cloud sync requires an authenticated Firebase session. Please sign in to sync your protocol."
@@ -552,8 +708,20 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
 
     fun handleInAppMessageAction(iam: InAppNotificationMessage) {
         notificationManager.dismissInAppMessage()
-        if (!iam.targetTaskId.isNullOrBlank() && (iam.actionRoute == "COMPLETE" || iam.actionRoute == "TIMER")) {
-            toggleProtocolItem(iam.targetTaskId)
+        if (iam.actionRoute == "COMPLETE" && !iam.targetTaskId.isNullOrBlank()) {
+            viewModelScope.launch {
+                val db = ProtocolDatabase.getDatabase(getApplication())
+                val today = repository.getTodayKey()
+                val profile = repository.getUserProfile()
+                com.example.data.notification.NotificationTaskValidator.validateAndComplete(
+                    dao = db.protocolDao(),
+                    taskId = iam.targetTaskId,
+                    taskTitle = iam.title,
+                    targetDateKey = today,
+                    targetUserId = profile?.firebaseUid ?: "local",
+                    currentDateKey = today
+                )
+            }
         }
     }
 
@@ -636,12 +804,13 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
             }
 
             val authResult = firebaseManager.signIn(email, password)
-            if (authResult.status == FirebaseSyncStatus.ERROR) {
-                onResult(FirebaseSyncStatus.ERROR, authResult.message)
+            if (authResult.status != FirebaseSyncStatus.REAL_SUCCESS) {
+                // OFFLINE_MODE and ERROR must NOT create an authenticated account session
+                onResult(authResult.status, authResult.message)
                 return@launch
             }
 
-            // Sync Firebase UID authority to Room UserProfile cache
+            // Sync Firebase UID authority to Room UserProfile cache ONLY on REAL_SUCCESS
             repository.setActiveUserSession(
                 firebaseUid = authResult.uid,
                 email = authResult.email ?: email,
@@ -649,6 +818,11 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
                 isEmailVerified = authResult.isEmailVerified,
                 role = "Member"
             )
+
+            // Immediately synchronize RevenueCat customer identity with the authenticated Firebase UID
+            authResult.uid?.let { uid ->
+                syncRevenueCatIdentity(uid)
+            }
 
             oneSignalManager.setTags(
                 mapOf(
@@ -683,12 +857,13 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
             }
 
             val authResult = firebaseManager.signUp(email, password, name)
-            if (authResult.status == FirebaseSyncStatus.ERROR) {
-                onResult(FirebaseSyncStatus.ERROR, authResult.message)
+            if (authResult.status != FirebaseSyncStatus.REAL_SUCCESS) {
+                // OFFLINE_MODE and ERROR must NOT create an authenticated account session
+                onResult(authResult.status, authResult.message)
                 return@launch
             }
 
-            // Sync Firebase UID authority to Room UserProfile cache
+            // Sync Firebase UID authority to Room UserProfile cache ONLY on REAL_SUCCESS
             repository.setActiveUserSession(
                 firebaseUid = authResult.uid,
                 email = authResult.email ?: email,
@@ -696,6 +871,11 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
                 isEmailVerified = authResult.isEmailVerified,
                 role = "Member"
             )
+
+            // Immediately synchronize RevenueCat customer identity with the authenticated Firebase UID
+            authResult.uid?.let { uid ->
+                syncRevenueCatIdentity(uid)
+            }
 
             oneSignalManager.setTags(
                 mapOf(
@@ -717,29 +897,70 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun signInWithGoogle(
-        googleEmail: String = "member@protocol.app",
-        googleName: String = "Protocol Member",
+        context: Context,
         onResult: (status: FirebaseSyncStatus, message: String) -> Unit
     ) {
         viewModelScope.launch {
-            val authResult = firebaseManager.signInWithGoogleSession(googleEmail, googleName)
-            if (authResult.status == FirebaseSyncStatus.ERROR) {
-                onResult(FirebaseSyncStatus.ERROR, authResult.message)
+            val authResult = firebaseManager.signInWithGoogle(context)
+            if (authResult.status != FirebaseSyncStatus.REAL_SUCCESS) {
+                onResult(authResult.status, authResult.message)
                 return@launch
             }
 
             // Sync Firebase UID authority to Room UserProfile cache
             repository.setActiveUserSession(
                 firebaseUid = authResult.uid,
-                email = authResult.email ?: googleEmail,
-                displayName = authResult.displayName ?: googleName,
+                email = authResult.email,
+                displayName = authResult.displayName,
                 isEmailVerified = authResult.isEmailVerified,
                 role = "Member"
             )
 
+            // Immediately synchronize RevenueCat customer identity with the authenticated Firebase UID
+            authResult.uid?.let { uid ->
+                syncRevenueCatIdentity(uid)
+            }
+
             oneSignalManager.setTags(
                 mapOf(
-                    "email" to googleEmail,
+                    "email" to (authResult.email ?: ""),
+                    "auth_provider" to "google",
+                    "firebase_uid" to (authResult.uid ?: ""),
+                    "auth_status" to authResult.status.name
+                )
+            )
+
+            onResult(authResult.status, authResult.message)
+        }
+    }
+
+    fun signInWithGoogleIdToken(
+        idToken: String,
+        onResult: (status: FirebaseSyncStatus, message: String) -> Unit
+    ) {
+        viewModelScope.launch {
+            val authResult = firebaseManager.signInWithGoogleIdToken(idToken)
+            if (authResult.status != FirebaseSyncStatus.REAL_SUCCESS) {
+                onResult(authResult.status, authResult.message)
+                return@launch
+            }
+
+            repository.setActiveUserSession(
+                firebaseUid = authResult.uid,
+                email = authResult.email,
+                displayName = authResult.displayName,
+                isEmailVerified = authResult.isEmailVerified,
+                role = "Member"
+            )
+
+            // Immediately synchronize RevenueCat customer identity with the authenticated Firebase UID
+            authResult.uid?.let { uid ->
+                syncRevenueCatIdentity(uid)
+            }
+
+            oneSignalManager.setTags(
+                mapOf(
+                    "email" to (authResult.email ?: ""),
                     "auth_provider" to "google",
                     "firebase_uid" to (authResult.uid ?: ""),
                     "auth_status" to authResult.status.name
@@ -754,10 +975,23 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             firebaseManager.signOut()
             repository.clearActiveUserSession()
+            revenueCatManager.resetUserIdentity()
             _isGuestSession.value = false
             _appNavState.value = AppNavDestination.Auth.route
         }
     }
+}
+
+/**
+ * Representation of the application's user session state:
+ * - AUTHENTICATED: Valid remote Firebase Auth user session established.
+ * - OFFLINE_GUEST: Local/offline guest mode explicitly chosen by user.
+ * - UNAUTHENTICATED: No active user session.
+ */
+enum class UserSessionState {
+    AUTHENTICATED,
+    OFFLINE_GUEST,
+    UNAUTHENTICATED
 }
 
 /**

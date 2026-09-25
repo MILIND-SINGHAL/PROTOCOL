@@ -387,6 +387,26 @@ class ProtocolNotificationManager(
                     .setAutoCancel(true)
                     .setContentIntent(pendingContentIntent)
 
+                val todayDate = repository.getTodayKey()
+                val currentUserId = repository.getUserProfile()?.firebaseUid ?: "local"
+
+                // Swipe-to-dismiss intent (ACTION_DISMISS_TASK)
+                val dismissIntent = Intent(context, ProtocolNotificationReceiver::class.java).apply {
+                    this.action = ProtocolNotificationReceiver.ACTION_DISMISS_TASK
+                    putExtra(ProtocolNotificationReceiver.EXTRA_TASK_ID, campaign.actions.firstOrNull()?.targetTaskId ?: "")
+                    putExtra(ProtocolNotificationReceiver.EXTRA_TASK_TITLE, campaign.title)
+                    putExtra(ProtocolNotificationReceiver.EXTRA_NOTIFICATION_ID, notificationId)
+                    putExtra(ProtocolNotificationReceiver.EXTRA_DATE_KEY, todayDate)
+                    putExtra(ProtocolNotificationReceiver.EXTRA_USER_ID, currentUserId)
+                }
+                val pendingDismissIntent = PendingIntent.getBroadcast(
+                    context,
+                    notificationId + 999,
+                    dismissIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                builder.setDeleteIntent(pendingDismissIntent)
+
                 // Add interactive action buttons
                 campaign.actions.forEachIndexed { index, action ->
                     val broadcastAction = when (action.actionType) {
@@ -394,6 +414,7 @@ class ProtocolNotificationManager(
                         "SNOOZE" -> ProtocolNotificationReceiver.ACTION_SNOOZE_TASK
                         "TIMER" -> ProtocolNotificationReceiver.ACTION_START_TIMER
                         "PACER" -> ProtocolNotificationReceiver.ACTION_LAUNCH_PACER
+                        "DISMISS" -> ProtocolNotificationReceiver.ACTION_DISMISS_TASK
                         else -> ProtocolNotificationReceiver.ACTION_COMPLETE_TASK
                     }
 
@@ -402,6 +423,9 @@ class ProtocolNotificationManager(
                         putExtra(ProtocolNotificationReceiver.EXTRA_TASK_ID, action.targetTaskId)
                         putExtra(ProtocolNotificationReceiver.EXTRA_TASK_TITLE, campaign.title)
                         putExtra(ProtocolNotificationReceiver.EXTRA_NOTIFICATION_ID, notificationId)
+                        putExtra(ProtocolNotificationReceiver.EXTRA_DATE_KEY, todayDate)
+                        putExtra(ProtocolNotificationReceiver.EXTRA_USER_ID, currentUserId)
+                        putExtra(ProtocolNotificationReceiver.EXTRA_ACTION_TYPE, action.actionType)
                     }
 
                     val pendingActionIntent = PendingIntent.getBroadcast(

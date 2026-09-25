@@ -16,6 +16,8 @@ import com.example.MainActivity
 import com.example.data.local.NotificationLogEntity
 import com.example.data.local.ProtocolCompletionEntity
 import com.example.data.local.ProtocolDatabase
+import com.example.data.notification.NotificationTaskValidator
+import com.example.data.notification.NotificationValidationResult
 import com.example.data.notification.ProtocolNotificationManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -32,10 +34,14 @@ class ProtocolNotificationReceiver : BroadcastReceiver() {
         const val ACTION_TRIGGER_SNOOZED_ALERT = "com.example.ACTION_TRIGGER_SNOOZED_ALERT"
         const val ACTION_START_TIMER = "com.example.ACTION_START_TIMER"
         const val ACTION_LAUNCH_PACER = "com.example.ACTION_LAUNCH_PACER"
+        const val ACTION_DISMISS_TASK = "com.example.ACTION_DISMISS_TASK"
 
         const val EXTRA_TASK_ID = "extra_task_id"
         const val EXTRA_TASK_TITLE = "extra_task_title"
         const val EXTRA_NOTIFICATION_ID = "extra_notification_id"
+        const val EXTRA_DATE_KEY = "extra_date_key"
+        const val EXTRA_USER_ID = "extra_user_id"
+        const val EXTRA_ACTION_TYPE = "extra_action_type"
 
         // Set of valid, recognized protocol task IDs in the application
         val VALID_PROTOCOL_ITEM_IDS = setOf(
@@ -52,14 +58,28 @@ class ProtocolNotificationReceiver : BroadcastReceiver() {
             "sleep_sunlight", "sleep_delay_caffeine", "sleep_hydration", "sleep_caffeine_cutoff",
             "sleep_nsdr", "sleep_blue_light", "sleep_magnesium", "sleep_temp"
         )
+        @Volatile
+        var testDatabase: ProtocolDatabase? = null
     }
 
     override fun onReceive(context: Context, intent: Intent?) {
         if (intent == null) return
+        val pendingResult = try { goAsync() } catch (_: Exception) { null }
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                handleIntent(context, intent)
+            } finally {
+                pendingResult?.finish()
+            }
+        }
+    }
 
+    suspend fun handleIntent(context: Context, intent: Intent) {
         val notificationId = intent.getIntExtra(EXTRA_NOTIFICATION_ID, -1)
-        val taskId = intent.getStringExtra(EXTRA_TASK_ID) ?: "protocol_task"
+        val taskId = intent.getStringExtra(EXTRA_TASK_ID) ?: ""
         val taskTitle = intent.getStringExtra(EXTRA_TASK_TITLE) ?: "Protocol Task"
+        val dateKey = intent.getStringExtra(EXTRA_DATE_KEY)
+        val userId = intent.getStringExtra(EXTRA_USER_ID)
 
         // Dismiss the current notification from shade if present
         if (notificationId != -1) {
@@ -67,57 +87,37 @@ class ProtocolNotificationReceiver : BroadcastReceiver() {
             notificationManager?.cancel(notificationId)
         }
 
+        val db = testDatabase ?: ProtocolDatabase.getDatabase(context)
+        val dao = db.protocolDao()
+
         when (intent.action) {
             ACTION_COMPLETE_TASK -> {
-                // Requirement 🔴 16: Validate that taskId belongs to today's recognized protocol items
-                if (taskId !in VALID_PROTOCOL_ITEM_IDS) {
-                    CoroutineScope(Dispatchers.IO).launch {
-                        val db = ProtocolDatabase.getDatabase(context)
-                        db.protocolDao().insertNotificationLog(
-                            NotificationLogEntity(
-                                title = "Rejected Notification Action",
-                                message = "Ignored completion request for unverified task ID '$taskId'.",
-                                tag = "action_rejected",
-                                timestamp = System.currentTimeMillis(),
-                                isRead = false
-                            )
-                        )
-                    }
-                    Handler(Looper.getMainLooper()).post {
-                        Toast.makeText(context, "⚠️ Unrecognized task ID. Completion ignored.", Toast.LENGTH_SHORT).show()
-                    }
-                    return
-                }
-
                 val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-                CoroutineScope(Dispatchers.IO).launch {
-                    val db = ProtocolDatabase.getDatabase(context)
-                    val dao = db.protocolDao()
+                val result = NotificationTaskValidator.validateAndComplete(
+                    dao = dao,
+                    taskId = taskId,
+                    taskTitle = taskTitle,
+                    targetDateKey = dateKey,
+                    targetUserId = userId,
+                    currentDateKey = today
+                )
 
-                    // Mark completed in Room database for today's date
-                    dao.insertOrUpdateCompletion(
-                        ProtocolCompletionEntity(
-                            dateKey = today,
-                            itemId = taskId,
-                            isCompleted = true,
-                            completedAt = System.currentTimeMillis()
-                        )
-                    )
-
-                    // Log execution event
-                    dao.insertNotificationLog(
-                        NotificationLogEntity(
-                            title = "Notification Action: $taskTitle",
-                            message = "Marked '$taskTitle' as complete directly from Android notification shade.",
-                            tag = "action_completed",
-                            timestamp = System.currentTimeMillis(),
-                            isRead = false
-                        )
-                    )
-                }
-
-                Handler(Looper.getMainLooper()).post {
-                    Toast.makeText(context, "✅ $taskTitle completed via notification action!", Toast.LENGTH_SHORT).show()
+                try {
+                    Handler(Looper.getMainLooper()).post {
+                        when (result) {
+                            is NotificationValidationResult.Success -> {
+                                Toast.makeText(context, "✅ $taskTitle completed via notification action!", Toast.LENGTH_SHORT).show()
+                            }
+                            is NotificationValidationResult.AlreadyCompleted -> {
+                                Toast.makeText(context, "ℹ️ $taskTitle is already completed for today.", Toast.LENGTH_SHORT).show()
+                            }
+                            is NotificationValidationResult.Rejected -> {
+                                Toast.makeText(context, "⚠️ Completion rejected: ${result.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                    // Ignore Toast dispatch failures in headless test runners
                 }
             }
 
@@ -131,6 +131,8 @@ class ProtocolNotificationReceiver : BroadcastReceiver() {
                     putExtra(EXTRA_TASK_ID, taskId)
                     putExtra(EXTRA_TASK_TITLE, taskTitle)
                     putExtra(EXTRA_NOTIFICATION_ID, if (notificationId != -1) notificationId + 500 else 8888)
+                    putExtra(EXTRA_DATE_KEY, dateKey ?: SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()))
+                    putExtra(EXTRA_USER_ID, userId ?: "")
                 }
 
                 val pendingSnoozeIntent = PendingIntent.getBroadcast(
@@ -148,21 +150,22 @@ class ProtocolNotificationReceiver : BroadcastReceiver() {
                     }
                 }
 
-                CoroutineScope(Dispatchers.IO).launch {
-                    val db = ProtocolDatabase.getDatabase(context)
-                    db.protocolDao().insertNotificationLog(
-                        NotificationLogEntity(
-                            title = "Notification Snooze Scheduled",
-                            message = "Scheduled 15-minute snooze alarm via AlarmManager for '$taskTitle'.",
-                            tag = "action_snoozed",
-                            timestamp = System.currentTimeMillis(),
-                            isRead = false
-                        )
+                dao.insertNotificationLog(
+                    NotificationLogEntity(
+                        title = "Notification Snooze Scheduled",
+                        message = "Scheduled 15-minute snooze alarm via AlarmManager for '$taskTitle'.",
+                        tag = "action_snoozed",
+                        timestamp = System.currentTimeMillis(),
+                        isRead = false
                     )
-                }
+                )
 
-                Handler(Looper.getMainLooper()).post {
-                    Toast.makeText(context, "⏰ Snoozed '$taskTitle' for 15 minutes.", Toast.LENGTH_SHORT).show()
+                try {
+                    Handler(Looper.getMainLooper()).post {
+                        Toast.makeText(context, "⏰ Snoozed '$taskTitle' for 15 minutes.", Toast.LENGTH_SHORT).show()
+                    }
+                } catch (_: Exception) {
+                    // Ignore Toast dispatch failures in headless test runners
                 }
             }
 
@@ -204,6 +207,8 @@ class ProtocolNotificationReceiver : BroadcastReceiver() {
                         putExtra(EXTRA_TASK_ID, taskId)
                         putExtra(EXTRA_TASK_TITLE, taskTitle)
                         putExtra(EXTRA_NOTIFICATION_ID, notificationId)
+                        putExtra(EXTRA_DATE_KEY, dateKey ?: SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date()))
+                        putExtra(EXTRA_USER_ID, userId ?: "")
                     }
                     val pendingCompleteIntent = PendingIntent.getBroadcast(
                         context,
@@ -222,8 +227,21 @@ class ProtocolNotificationReceiver : BroadcastReceiver() {
                 }
             }
 
+            ACTION_DISMISS_TASK -> {
+                // Dismiss action must NOT mark the task complete
+                dao.insertNotificationLog(
+                    NotificationLogEntity(
+                        title = "Notification Dismissed",
+                        message = "Dismissed alert for '$taskTitle'. No completion recorded.",
+                        tag = "action_dismissed",
+                        timestamp = System.currentTimeMillis(),
+                        isRead = false
+                    )
+                )
+            }
+
             ACTION_START_TIMER, ACTION_LAUNCH_PACER -> {
-                // Launch MainActivity with target route
+                // Launch MainActivity with target route (does not complete task)
                 val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
                     putExtra("route", if (intent.action == ACTION_LAUNCH_PACER) "pacer" else "timer")

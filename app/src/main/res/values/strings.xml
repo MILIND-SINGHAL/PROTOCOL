@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Protocol</string>
+    <string name="google_web_client_id" translatable="false">415997460894-f87ogjb4065j2kchf2obo6ss5tgre2r4.apps.googleusercontent.com</string>
 </resources>

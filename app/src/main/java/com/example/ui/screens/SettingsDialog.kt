@@ -960,7 +960,7 @@ fun SettingsDialog(
                                             viewModel.sendEmailVerification { status, msg ->
                                                 isVerifyingEmail = false
                                                 authFeedback = msg
-                                                authFeedbackIsError = (status == FirebaseSyncStatus.ERROR)
+                                                authFeedbackIsError = (status != FirebaseSyncStatus.REAL_SUCCESS)
                                             }
                                         }
                                         .padding(vertical = 8.dp),
@@ -990,7 +990,7 @@ fun SettingsDialog(
                                             viewModel.refreshEmailVerificationStatus { status, verified, msg ->
                                                 isCheckingVerification = false
                                                 authFeedback = msg
-                                                authFeedbackIsError = (status == FirebaseSyncStatus.ERROR)
+                                                authFeedbackIsError = (status != FirebaseSyncStatus.REAL_SUCCESS || !verified)
                                             }
                                         }
                                         .padding(vertical = 8.dp),
@@ -1035,7 +1035,7 @@ fun SettingsDialog(
                             viewModel.syncCloudData { status, msg ->
                                 isSyncingCloud = false
                                 authFeedback = msg
-                                authFeedbackIsError = (status == FirebaseSyncStatus.ERROR)
+                                authFeedbackIsError = (status != FirebaseSyncStatus.REAL_SUCCESS)
                             }
                         }
                         .padding(vertical = 10.dp),
