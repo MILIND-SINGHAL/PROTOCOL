@@ -121,7 +121,7 @@ fun CircadianCurveCard(
                 title = "Phase 3: Evening Wind-Down Transition",
                 subtitle = "Hours 11–16 Post-Wake",
                 protocolRule = "Dim artificial lighting = wake time + 12–14h; Cool sleep environment (18°C).",
-                scientificReason = "Minimizes evening retinal stimulation to facilitate natural melatonin secretion.",
+                scientificReason = "Minimizes evening bright light stimulation to support natural evening wind-down.",
                 confidence = "General guidance",
                 hoursOffset = "11h – 16h"
             ),
@@ -130,7 +130,7 @@ fun CircadianCurveCard(
                 title = "Phase 4: Restorative Sleep Opportunity",
                 subtitle = "Hours 16–24 Post-Wake",
                 protocolRule = "Consistent dark sleep opportunity window: ~7–9 hours uninterrupted.",
-                scientificReason = "Allows slow-wave delta sleep and REM cycles to consolidate recovery and memory.",
+                scientificReason = "Supports restorative sleep stages that help consolidate physical recovery and memory.",
                 confidence = "General guidance",
                 hoursOffset = "16h – 24h"
             )

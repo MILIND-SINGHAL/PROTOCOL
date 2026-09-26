@@ -3,7 +3,7 @@
 ## Security Threat Model
 
 ### Component Overview
-The **Protocol** application is an Android circadian rhythm, bio-protocol, and wellness management platform built with Jetpack Compose, Room Database, RevenueCat, and OneSignal. The user requested protection against APK modification/modding (decompilation, smali patching, re-signing, root injection, memory hooking) to ensure unauthorized actors cannot gain access to any privileged or "admin control" mechanisms.
+The **Protocol** application is an Android circadian rhythm, bio-protocol, and wellness management platform built with Jetpack Compose, Room Database, and RevenueCat. The user requested protection against APK modification/modding (decompilation, smali patching, re-signing, root injection, memory hooking) to ensure unauthorized actors cannot gain access to any privileged or "admin control" mechanisms.
 
 ### Entry Points and Untrusted Inputs
 | Entry Point | Type | Trusted? | Validation |

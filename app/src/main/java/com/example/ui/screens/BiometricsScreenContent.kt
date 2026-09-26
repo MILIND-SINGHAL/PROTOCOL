@@ -150,7 +150,7 @@ fun BiometricsScreenContent(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Live telemetry linked to circadian protocol scheduling",
+                            text = "Autonomic sensor status & circadian timing integration",
                             color = palette.mutedForeground,
                             fontSize = 11.sp
                         )
@@ -251,7 +251,7 @@ fun BiometricsScreenContent(
             }
         }
 
-        // Live OneSignal Cloud Sync Status
+        // Automated Circadian Notification Sync Status
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -281,7 +281,7 @@ fun BiometricsScreenContent(
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Notification tags 'wake_time', 'wearable_type', 'recovery_score', and 'is_pro' are automatically updated with real-time biometric metrics.",
+                    text = "Notification tags 'wake_time', 'wearable_type', and 'is_pro' are automatically updated for circadian timing notifications.",
                     color = palette.mutedForeground,
                     fontSize = 11.sp,
                     lineHeight = 15.sp

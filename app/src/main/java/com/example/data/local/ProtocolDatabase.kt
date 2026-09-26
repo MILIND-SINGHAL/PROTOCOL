@@ -13,9 +13,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserProfileEntity::class,
         ProtocolCompletionEntity::class,
         NotificationLogEntity::class,
-        OneSignalSettingsEntity::class
+        NotificationSettingsEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class ProtocolDatabase : RoomDatabase() {
@@ -51,6 +51,55 @@ abstract class ProtocolDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE `user_profile` ADD COLUMN `caffeineDelayMinutes` INTEGER NOT NULL DEFAULT 90")
                 db.execSQL("ALTER TABLE `user_profile` ADD COLUMN `lightWindowMinutes` INTEGER NOT NULL DEFAULT 60")
                 db.execSQL("ALTER TABLE `user_profile` ADD COLUMN `windDownHours` INTEGER NOT NULL DEFAULT 14")
+            }
+        }
+
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Rename onesignal_settings table to notification_settings if it exists
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `notification_settings` (
+                        `id` INTEGER NOT NULL PRIMARY KEY,
+                        `pushEnabled` INTEGER NOT NULL,
+                        `caffeineAlert` INTEGER NOT NULL,
+                        `luxAlert` INTEGER NOT NULL,
+                        `windDownAlert` INTEGER NOT NULL,
+                        `channelId` TEXT NOT NULL,
+                        `notificationId` TEXT NOT NULL,
+                        `lastCampaignSent` TEXT DEFAULT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("""
+                    INSERT OR IGNORE INTO `notification_settings` SELECT 
+                        `id`, `pushEnabled`, `caffeineAlert`, `luxAlert`, 
+                        `windDownAlert`, `channelId`, `notificationId`, `lastCampaignSent` 
+                    FROM `onesignal_settings`
+                """.trimIndent())
+                db.execSQL("DROP TABLE IF EXISTS `onesignal_settings`")
+            }
+        }
+
+        val MIGRATION_5_4 = object : Migration(5, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `onesignal_settings` (
+                        `id` INTEGER NOT NULL PRIMARY KEY,
+                        `pushEnabled` INTEGER NOT NULL,
+                        `caffeineAlert` INTEGER NOT NULL,
+                        `luxAlert` INTEGER NOT NULL,
+                        `windDownAlert` INTEGER NOT NULL,
+                        `channelId` TEXT NOT NULL,
+                        `notificationId` TEXT NOT NULL,
+                        `lastCampaignSent` TEXT DEFAULT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("""
+                    INSERT OR IGNORE INTO `onesignal_settings` SELECT 
+                        `id`, `pushEnabled`, `caffeineAlert`, `luxAlert`, 
+                        `windDownAlert`, `channelId`, `notificationId`, `lastCampaignSent` 
+                    FROM `notification_settings`
+                """.trimIndent())
+                db.execSQL("DROP TABLE IF EXISTS `notification_settings`")
             }
         }
 
@@ -144,8 +193,8 @@ abstract class ProtocolDatabase : RoomDatabase() {
                     "protocol_wellness.db"
                 )
                 .addMigrations(
-                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
-                    MIGRATION_4_3, MIGRATION_3_2, MIGRATION_2_1
+                    MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
+                    MIGRATION_5_4, MIGRATION_4_3, MIGRATION_3_2, MIGRATION_2_1
                 )
 
                 // Requirement 25: Never destroy user database on downgrade in production.

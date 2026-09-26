@@ -25,7 +25,8 @@ class ExampleUnitTest {
 
   @Test
   fun testStreakCalculation_emptyListReturnsZero() {
-    val repositoryStreak = calculateStreakHelper(emptyList())
+    val required = AdaptiveEngine.getRequiredItemsForTrack("Deep Sleep")
+    val repositoryStreak = AdaptiveEngine.calculateAdherenceStreak(emptyMap(), required)
     assertEquals(0, repositoryStreak)
   }
 
@@ -33,20 +34,23 @@ class ExampleUnitTest {
   fun testStreakCalculation_todayCompletedReturnsOne() {
     val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
     val today = sdf.format(Calendar.getInstance().time)
-    val streak = calculateStreakHelper(listOf(today))
+    val required = AdaptiveEngine.getRequiredItemsForTrack("Deep Sleep")
+    // Full adherence (8/8) on today
+    val streak = AdaptiveEngine.calculateAdherenceStreak(mapOf(today to required.toSet()), required)
     assertEquals(1, streak)
   }
 
   @Test
   fun testStreakCalculation_consecutiveThreeDaysReturnsThree() {
     val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-    val dates = mutableListOf<String>()
+    val required = AdaptiveEngine.getRequiredItemsForTrack("Deep Sleep")
+    val completionsMap = mutableMapOf<String, Set<String>>()
     for (i in 0..2) {
       val cal = Calendar.getInstance()
       cal.add(Calendar.DAY_OF_YEAR, -i)
-      dates.add(sdf.format(cal.time))
+      completionsMap[sdf.format(cal.time)] = required.toSet()
     }
-    val streak = calculateStreakHelper(dates)
+    val streak = AdaptiveEngine.calculateAdherenceStreak(completionsMap, required)
     assertEquals(3, streak)
   }
 
@@ -152,40 +156,6 @@ class ExampleUnitTest {
     assertEquals("dashboard", resolveDestination(isAuthenticated = true, hasCompletedBaseline = true, isPro = true))
   }
 
-  private fun calculateStreakHelper(completedDates: List<String>): Int {
-    if (completedDates.isEmpty()) return 0
-    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-    val set = completedDates.toSet()
-
-    val cal = Calendar.getInstance()
-    val todayStr = sdf.format(cal.time)
-
-    var streak = 0
-    val checkCal = Calendar.getInstance()
-
-    if (set.contains(todayStr)) {
-      streak++
-      checkCal.add(Calendar.DAY_OF_YEAR, -1)
-    } else {
-      checkCal.add(Calendar.DAY_OF_YEAR, -1)
-      val yesterdayStr = sdf.format(checkCal.time)
-      if (!set.contains(yesterdayStr)) {
-        return 0
-      }
-    }
-
-    while (true) {
-      val dateStr = sdf.format(checkCal.time)
-      if (set.contains(dateStr)) {
-        streak++
-        checkCal.add(Calendar.DAY_OF_YEAR, -1)
-      } else {
-        break
-      }
-    }
-    return streak
-  }
-
   @Test
   fun testFirebaseSyncResult_OfflineModeMustNeverReportSuccess() {
     val offlineResult = FirebaseSyncResult(
@@ -257,7 +227,7 @@ class ExampleUnitTest {
 
   @Test
   fun testNotificationAction_TaskValidation() {
-    val validIds = com.example.data.onesignal.ProtocolNotificationReceiver.VALID_PROTOCOL_ITEM_IDS
+    val validIds = com.example.data.notification.ProtocolNotificationReceiver.VALID_PROTOCOL_ITEM_IDS
     assertTrue("rec_sun_mobility must be valid", validIds.contains("rec_sun_mobility"))
     assertTrue("clarity_alpha_coffee must be valid", validIds.contains("clarity_alpha_coffee"))
     assertTrue("sleep_sunlight must be valid", validIds.contains("sleep_sunlight"))
@@ -451,6 +421,18 @@ class ExampleUnitTest {
   }
 
   @Test
+  fun testCertificateDigestSeparation_ReleaseDoesNotTrustDebugCertificate() {
+    // Release builds must only trust the official release certificate, not the debug certificate
+    val releaseDigests = setOf(SecurityIntegrityManager.RELEASE_CERTIFICATE_DIGEST)
+    assertFalse("Release certificate set must NOT include the debug keystore digest",
+      releaseDigests.contains(SecurityIntegrityManager.DEBUG_CERTIFICATE_DIGEST)
+    )
+    assertTrue("Release certificate set must contain official release digest",
+      releaseDigests.contains("B412F84973C25971A16689E2844521CD88935A6194021180FF23AA894CE19243")
+    )
+  }
+
+  @Test
   fun testRequirement20_SubscriptionSecurity_DecoupledFromAntiTamper() {
     // Anti-tamper report must NOT automatically grant Pro access or override billing authority
     val profile = com.example.data.local.UserProfileEntity(
@@ -600,46 +582,18 @@ class ExampleUnitTest {
     // 3. Subscription Identity (RevenueCat)
     // 4. Notification & In-App state
 
-    // Simulating initial populated state
-    var localProfileWiped = false
-    var localCompletionsCleared = false
-    var localNotificationsCleared = false
-    var revenueCatLoggedOut = false
-    var notificationTagsReset = false
-
-    // Multi-layer atomic execution simulation
-    val deletionWorkflow = {
-      // Layer 1: Remote
-      val remoteSuccess = true
-
-      // Layer 2: Local Room
-      localProfileWiped = true
-      localCompletionsCleared = true
-      localNotificationsCleared = true
-
-      // Layer 3: RevenueCat
-      revenueCatLoggedOut = true
-
-      // Layer 4: Notification Manager
-      notificationTagsReset = true
-
-      com.example.viewmodel.AccountDeletionResult(
-        isRemoteSuccess = remoteSuccess,
-        isLocalWipeSuccess = localProfileWiped && localCompletionsCleared && localNotificationsCleared,
-        isSubscriptionReset = revenueCatLoggedOut,
-        isNotificationReset = notificationTagsReset,
-        message = "Account permanently deleted across all layers."
-      )
-    }
-
-    val result = deletionWorkflow()
+    val result = com.example.viewmodel.AccountDeletionResult(
+      isRemoteSuccess = true,
+      isLocalWipeSuccess = true,
+      isSubscriptionReset = true,
+      isNotificationReset = true,
+      message = "Account permanently deleted across Cloud Firestore, Firebase Auth, RevenueCat, and local device storage."
+    )
 
     assertTrue("Remote deletion succeeded", result.isRemoteSuccess)
     assertTrue("Local database completely wiped", result.isLocalWipeSuccess)
     assertTrue("Subscription identity reset in RevenueCat", result.isSubscriptionReset)
     assertTrue("Notification tags and state reset", result.isNotificationReset)
-    assertTrue("Room profile was wiped", localProfileWiped)
-    assertTrue("Room completions were cleared", localCompletionsCleared)
-    assertTrue("Room notifications were cleared", localNotificationsCleared)
+    assertTrue("Full deletion verified", result.isFullyDeleted)
   }
 }

@@ -9,7 +9,7 @@ import com.example.data.notification.InAppNotificationMessage
 import com.example.data.notification.NotificationAction
 import com.example.data.notification.NotificationCampaign
 import com.example.data.notification.ProtocolNotificationManager
-import com.example.data.onesignal.ProtocolNotificationReceiver
+import com.example.data.notification.ProtocolNotificationReceiver
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals

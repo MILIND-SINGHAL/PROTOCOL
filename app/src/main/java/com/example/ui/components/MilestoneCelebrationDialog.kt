@@ -98,7 +98,7 @@ fun MilestoneCelebrationDialog(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Text(
-                    text = "Sunlight, hydration electrolytes, and cardiovascular priming are complete. Your adenosine receptors are primed for clean focus.",
+                    text = "Sunlight, hydration electrolytes, and morning movement are complete. Your morning foundation is set for clean, focused work.",
                     color = palette.mutedForeground,
                     fontSize = 13.sp,
                     lineHeight = 18.sp

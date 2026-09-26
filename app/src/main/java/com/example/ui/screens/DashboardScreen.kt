@@ -145,16 +145,16 @@ fun DashboardScreen(
     var showMilestoneCelebration by remember { mutableStateOf(false) }
     var showCircadianTransparencyDialog by remember { mutableStateOf(false) }
 
-    val activeInAppMessage by viewModel.oneSignalManager.activeInAppMessage.collectAsState()
+    val activeInAppMessage by viewModel.notificationManager.activeInAppMessage.collectAsState()
     val adaptiveState by viewModel.adaptiveProtocolState.collectAsState()
 
     val currentFocus = userProfile?.focus ?: "Deep Sleep"
 
     val protocolTracks = remember {
         listOf(
-            ProtocolTrack("Physical Recovery", "Muscle Recovery", "DOMS & tissue repair", Icons.Default.FitnessCenter),
-            ProtocolTrack("Deep Sleep", "Deep Sleep", "Delta waves & melatonin", Icons.Default.Bedtime),
-            ProtocolTrack("Mental Clarity", "Mental Clarity", "Dopamine & focus sprints", Icons.Default.Psychology),
+            ProtocolTrack("Physical Recovery", "Muscle Recovery", "Mobility & rest routine", Icons.Default.FitnessCenter),
+            ProtocolTrack("Deep Sleep", "Deep Sleep", "Evening wind-down & sleep habits", Icons.Default.Bedtime),
+            ProtocolTrack("Mental Clarity", "Mental Clarity", "Focus & attention blocks", Icons.Default.Psychology),
             ProtocolTrack("All Stacks", "All Stacks", "Complete executive stack", Icons.Default.Bolt)
         )
     }
@@ -166,7 +166,7 @@ fun DashboardScreen(
     val activePlan = remember(currentFocus, durationMultiplier, priorityId, priorityLabel) {
         val rawPlan = when (currentFocus) {
             "Physical Recovery", "Muscle Recovery" -> BiologicalStackPlan(
-                morningCaption = "Dynamic mobility and cellular muscular hydration.",
+                morningCaption = "Dynamic mobility and morning hydration.",
                 morningItems = listOf(
                     DashboardStackItem("rec_sun_mobility", "Sunlight + Joint Mobilization", "10 min hips & spine in natural daylight", Icons.Default.WbSunny, hasTimer = true, defaultMinutes = 10),
                     DashboardStackItem("rec_creatine_water", "Hydration + Creatine & Protein", "500ml water + electrolytes & dietary protein", Icons.Default.WaterDrop),
@@ -245,7 +245,7 @@ fun DashboardScreen(
                 eveningItems = listOf(
                     DashboardStackItem("sleep_blue_light", "Dim Overhead Lighting (2h Pre-Bed)", "Minimize bright artificial illumination to support sleep onset", Icons.Default.Nightlight),
                     DashboardStackItem("sleep_magnesium", "Evening Relaxation Nutrition", "Magnesium to support neuromuscular calm and quiet the mind", Icons.Default.Bedtime, hasInfo = true),
-                    DashboardStackItem("sleep_temp", "Cool Bedroom (18°C / 65°F)", "Supports the natural core temperature decline required for deep sleep", Icons.Default.DeviceThermostat)
+                    DashboardStackItem("sleep_temp", "Cool Bedroom (18°C / 65°F)", "Supports the natural core temperature decline associated with restful sleep", Icons.Default.DeviceThermostat)
                 ),
                 focusTagline = "Optimized for Restorative Sleep Architecture & Daily Rhythm"
             )
@@ -253,7 +253,7 @@ fun DashboardScreen(
 
         fun adaptItem(item: DashboardStackItem): DashboardStackItem {
             val isTargetPriority = priorityId != null && item.id == priorityId
-            val scaledMinutes = (item.defaultMinutes * durationMultiplier).toInt().coerceAtLeast(3)
+            val scaledMinutes = adaptiveState.getScaledMinutes(item.id, item.defaultMinutes)
             return item.copy(
                 defaultMinutes = scaledMinutes,
                 isPriority = isTargetPriority,
@@ -1076,7 +1076,7 @@ fun DashboardScreen(
     // Viral Share Sheet Card Dialog
     if (showStreakShare) {
         com.example.ui.components.StreakShareDialog(
-            streakDays = userProfile?.streakDays ?: 3,
+            streakDays = realStreak,
             completedRatio = "${completedItems.size}/${morningItems.size + middayItems.size + eveningItems.size}",
             onDismiss = { showStreakShare = false }
         )
@@ -1093,7 +1093,7 @@ fun DashboardScreen(
     }
 
     // Top-floating In-App Message Banner
-    com.example.ui.components.OneSignalInAppMessageBanner(
+    com.example.ui.components.ProtocolInAppMessageBanner(
         message = activeInAppMessage,
         onActionClick = { iam ->
             triggerHaptic(context, 1)
@@ -1602,6 +1602,40 @@ private fun AdaptiveEngineFeedbackCard(
                         color = palette.foreground,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+
+            if (adaptiveState.threeDayAdherence != null || adaptiveState.sevenDayAdherence != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(palette.surfaceRaised)
+                        .border(1.dp, palette.border, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "3-DAY: ${adaptiveState.threeDayAdherence?.let { "${(it * 100).toInt()}%" } ?: "--"}",
+                        color = palette.mutedForeground,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "7-DAY: ${adaptiveState.sevenDayAdherence?.let { "${(it * 100).toInt()}%" } ?: "--"}",
+                        color = palette.mutedForeground,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "PROTOCOL SCORE: ${adaptiveState.protocolScore}",
+                        color = palette.accent,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 0.5.sp
                     )
                 }
             }

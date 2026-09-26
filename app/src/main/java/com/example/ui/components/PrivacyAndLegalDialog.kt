@@ -213,6 +213,9 @@ fun PrivacyAndLegalDialog(
                         }
                     }
                 } else {
+                    var isDeleting by remember { mutableStateOf(false) }
+                    var statusIsError by remember { mutableStateOf(false) }
+
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -221,32 +224,49 @@ fun PrivacyAndLegalDialog(
                             .padding(12.dp)
                     ) {
                         Text("Permanently erase everything?", color = palette.foreground, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "This erases your Room local completions, cached Pro entitlement, notification tags, and permanently deletes your Firebase Auth account and Firestore cloud records.",
+                            color = palette.mutedForeground,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp
+                        )
                         Spacer(modifier = Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
                                     .clip(RoundedCornerShape(8.dp))
-                                    .background(palette.danger)
-                                    .clickable {
+                                    .background(if (isDeleting) palette.danger.copy(alpha = 0.5f) else palette.danger)
+                                    .clickable(enabled = !isDeleting) {
                                         triggerHaptic(context, 2)
                                         scope.launch {
-                                            viewModel.wipeUserData()
-                                            statusMessage = "All data erased. Protocol reset to pristine state."
-                                            showDeleteConfirm = false
+                                            isDeleting = true
+                                            val result = viewModel.wipeUserData()
+                                            isDeleting = false
+                                            statusMessage = result.message
+                                            statusIsError = !result.isFullyDeleted
+                                            if (result.isFullyDeleted) {
+                                                showDeleteConfirm = false
+                                            }
                                         }
                                     }
                                     .padding(vertical = 8.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text("Erase Now", color = palette.surface, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text(
+                                    if (isDeleting) "Erasing..." else "Erase Now",
+                                    color = palette.surface,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
                             }
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
                                     .clip(RoundedCornerShape(8.dp))
                                     .background(palette.surface)
-                                    .clickable { showDeleteConfirm = false }
+                                    .clickable(enabled = !isDeleting) { showDeleteConfirm = false }
                                     .padding(vertical = 8.dp),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -258,7 +278,15 @@ fun PrivacyAndLegalDialog(
 
                 if (statusMessage != null) {
                     Spacer(modifier = Modifier.height(10.dp))
-                    Text(text = statusMessage ?: "", color = palette.accent, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = statusMessage ?: "",
+                        color = if (statusMessage?.contains("could not be completed", ignoreCase = true) == true ||
+                            statusMessage?.contains("error", ignoreCase = true) == true ||
+                            statusMessage?.contains("Re-authentication", ignoreCase = true) == true) palette.danger else palette.accent,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        lineHeight = 15.sp
+                    )
                 }
             }
         }

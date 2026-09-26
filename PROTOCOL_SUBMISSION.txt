@@ -74,7 +74,7 @@ Additional features include:
 - Binaural Focus Soundscapes: Pink noise, Theta waves, and ambient focus loops.
 - Habit Streaks & Daily Adherence: Local Room database tracking lifetime
   streaks and daily protocol completion.
-- Push Reminders: Timed OneSignal reminders for morning sunlight and evening
+- Push Reminders: Timed notifications for morning sunlight and evening
   screen shut-off.
 
 [HOW WE BUILT IT]
@@ -87,7 +87,7 @@ Additional features include:
   capabilities.
 - Monetization: RevenueCat Android SDK (v8.12.3) managing subscriptions,
   paywalls, and remote entitlement synchronization.
-- Notifications: OneSignal Android SDK for circadian event scheduling.
+- Notifications: Protocol notification system with AlarmManager for circadian event scheduling.
 - Integrity: Custom SecurityIntegrityManager with zero-client admin attack
   surface and tamper-detection safeguards.
 

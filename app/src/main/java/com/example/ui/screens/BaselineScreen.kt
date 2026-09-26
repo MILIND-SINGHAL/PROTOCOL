@@ -282,9 +282,9 @@ fun BaselineScreen(
                     1 -> {
                         // Focus optimization
                         val focusOptions = listOf(
-                            Triple("Physical Recovery", "Muscle recovery & tissue repair (DOMS, creatine & flush)", Icons.Default.FitnessCenter),
-                            Triple("Deep Sleep", "Recover deeper, wake sharper (Delta waves & melatonin)", Icons.Default.Bedtime),
-                            Triple("Mental Clarity", "Protect focus & cognitive stamina (Dopamine & deep work)", Icons.Default.Psychology),
+                            Triple("Physical Recovery", "Mobility, hydration & low-impact movement (Rest & recovery routine)", Icons.Default.FitnessCenter),
+                            Triple("Deep Sleep", "Restful sleep habits & evening wind-down (Circadian alignment)", Icons.Default.Bedtime),
+                            Triple("Mental Clarity", "Protect focus & cognitive stamina (Structured work blocks & NSDR)", Icons.Default.Psychology),
                             Triple("All Stacks", "The complete executive bio-stack (All protocols combined)", Icons.Default.Bolt)
                         )
 

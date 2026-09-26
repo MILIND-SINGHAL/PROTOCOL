@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Notifications
@@ -40,8 +41,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
@@ -79,6 +82,7 @@ fun AccountScreenContent(
 
     var isGoogleLoading by remember { mutableStateOf(false) }
 
+    val scope = rememberCoroutineScope()
     val isAuthenticated = sessionState == UserSessionState.AUTHENTICATED
     val userEmail = userProfile?.email
     val isGoogleUser = isAuthenticated && userEmail?.endsWith("@gmail.com", ignoreCase = true) == true
@@ -584,6 +588,164 @@ fun AccountScreenContent(
                             color = palette.mutedForeground,
                             fontSize = 11.sp
                         )
+                    }
+                }
+
+                HorizontalDivider(color = palette.border)
+
+                // Delete Account
+                var showDeleteConfirmDialog by remember { mutableStateOf(false) }
+                var deleteStatusMessage by remember { mutableStateOf<String?>(null) }
+                var isDeletingAccount by remember { mutableStateOf(false) }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable {
+                            triggerHaptic(context, 2)
+                            showDeleteConfirmDialog = true
+                        }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DeleteForever,
+                        contentDescription = null,
+                        tint = palette.danger,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Delete Account & Wipe Cloud Data",
+                            color = palette.danger,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = "Permanently removes Firebase Auth, Firestore records, and local data",
+                            color = palette.mutedForeground,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+
+                if (showDeleteConfirmDialog) {
+                    androidx.compose.ui.window.Dialog(
+                        onDismissRequest = {
+                            if (!isDeletingAccount) {
+                                showDeleteConfirmDialog = false
+                                deleteStatusMessage = null
+                            }
+                        }
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(palette.surface)
+                                .border(1.dp, palette.border, RoundedCornerShape(20.dp))
+                                .padding(20.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.DeleteForever,
+                                        contentDescription = null,
+                                        tint = palette.danger,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "Permanently Delete Account?",
+                                        color = palette.foreground,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+
+                                Text(
+                                    text = "This action is immediate and permanent. It deletes your authenticated Firebase user identity, wipes your cloud Firestore document (/users/{uid}), resets your RevenueCat customer session, cancels all local notifications, and erases local completions and profile.",
+                                    color = palette.mutedForeground,
+                                    fontSize = 12.sp,
+                                    lineHeight = 16.sp
+                                )
+
+                                if (deleteStatusMessage != null) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(palette.danger.copy(alpha = 0.1f))
+                                            .border(1.dp, palette.danger.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                                            .padding(10.dp)
+                                    ) {
+                                        Text(
+                                            text = deleteStatusMessage ?: "",
+                                            color = palette.danger,
+                                            fontSize = 11.sp,
+                                            lineHeight = 15.sp
+                                        )
+                                    }
+                                }
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(if (isDeletingAccount) palette.danger.copy(alpha = 0.5f) else palette.danger)
+                                            .clickable(enabled = !isDeletingAccount) {
+                                                triggerHaptic(context, 2)
+                                                isDeletingAccount = true
+                                                deleteStatusMessage = null
+                                                scope.launch {
+                                                    val result = viewModel.deleteAccountPermanently()
+                                                    isDeletingAccount = false
+                                                    if (result.isFullyDeleted) {
+                                                        showDeleteConfirmDialog = false
+                                                    } else {
+                                                        deleteStatusMessage = result.message
+                                                    }
+                                                }
+                                            }
+                                            .padding(vertical = 10.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = if (isDeletingAccount) "Deleting..." else "Permanently Delete",
+                                            color = palette.surface,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(palette.surfaceRaised)
+                                            .clickable(enabled = !isDeletingAccount) {
+                                                showDeleteConfirmDialog = false
+                                                deleteStatusMessage = null
+                                            }
+                                            .padding(vertical = 10.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "Cancel",
+                                            color = palette.mutedForeground,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }

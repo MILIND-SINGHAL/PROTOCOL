@@ -88,13 +88,13 @@ interface ProtocolDao {
     @Query("DELETE FROM notification_logs")
     suspend fun clearNotifications()
 
-    // OneSignal Settings
-    @Query("SELECT * FROM onesignal_settings WHERE id = 1")
-    fun getOneSignalSettingsFlow(): Flow<OneSignalSettingsEntity?>
+    // Notification Settings
+    @Query("SELECT * FROM notification_settings WHERE id = 1")
+    fun getNotificationSettingsFlow(): Flow<NotificationSettingsEntity?>
 
-    @Query("SELECT * FROM onesignal_settings WHERE id = 1")
-    suspend fun getOneSignalSettings(): OneSignalSettingsEntity?
+    @Query("SELECT * FROM notification_settings WHERE id = 1")
+    suspend fun getNotificationSettings(): NotificationSettingsEntity?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun saveOneSignalSettings(settings: OneSignalSettingsEntity)
+    suspend fun saveNotificationSettings(settings: NotificationSettingsEntity)
 }

@@ -71,6 +71,7 @@ fun SettingsDialog(
     val palette = ProtocolTheme.palette
     val context = LocalContext.current
     val profile by viewModel.userProfile.collectAsState()
+    val sessionState by viewModel.sessionState.collectAsState()
 
     var authFeedback by remember { mutableStateOf<String?>(null) }
     var authFeedbackIsError by remember { mutableStateOf(false) }
@@ -161,7 +162,7 @@ fun SettingsDialog(
                 HorizontalDivider(color = palette.border)
                 Spacer(modifier = Modifier.height(18.dp))
 
-                // OneSignal Integration Section
+                // Protocol Notification Section
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -258,9 +259,9 @@ fun SettingsDialog(
                 Spacer(modifier = Modifier.height(4.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     listOf(
-                        "• Morning Lux Window (0-30 min post-wake)",
-                        "• Caffeine Unlock (90 min post-wake)",
-                        "• Melatonin Dimming (14 hr post-wake)",
+                        "• Morning Light Window (0-30 min post-wake)",
+                        "• Caffeine Window Unlock (90 min post-wake)",
+                        "• Evening Dimming (14 hr post-wake)",
                         "• Wind-Down Sequence (16 hr post-wake)"
                     ).forEach { alert ->
                         Text(
@@ -318,7 +319,7 @@ fun SettingsDialog(
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Live biometric synchronization for automated wake detection, recovery scores, and HRV.",
+                    text = "Health Connect & wearable configuration for local wake protocols, recovery scores, and HRV telemetry.",
                     color = palette.mutedForeground,
                     fontSize = 11.sp,
                     lineHeight = 16.sp
@@ -848,16 +849,17 @@ fun SettingsDialog(
                         )
                     }
 
+                    val isCloudSyncActive = sessionState == com.example.viewmodel.UserSessionState.AUTHENTICATED
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(6.dp))
-                            .background(if (viewModel.firebaseManager.isFirebaseInitialized) palette.success.copy(alpha = 0.15f) else palette.surfaceRaised)
-                            .border(1.dp, if (viewModel.firebaseManager.isFirebaseInitialized) palette.success else palette.border, RoundedCornerShape(6.dp))
+                            .background(if (isCloudSyncActive) palette.success.copy(alpha = 0.15f) else palette.surfaceRaised)
+                            .border(1.dp, if (isCloudSyncActive) palette.success else palette.border, RoundedCornerShape(6.dp))
                             .padding(horizontal = 6.dp, vertical = 3.dp)
                     ) {
                         Text(
-                            text = if (viewModel.firebaseManager.isFirebaseInitialized) "SYNC ACTIVE" else "LOCAL SECURE",
-                            color = if (viewModel.firebaseManager.isFirebaseInitialized) palette.success else palette.accent,
+                            text = if (isCloudSyncActive) "SYNC ACTIVE" else "LOCAL SECURE",
+                            color = if (isCloudSyncActive) palette.success else palette.accent,
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 0.8.sp
@@ -866,7 +868,7 @@ fun SettingsDialog(
                 }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Encrypted biometric synchronization for wake protocols, stacks, and streaks.",
+                    text = "Cloud backup & sync for your protocol settings, completions, and streak history.",
                     color = palette.mutedForeground,
                     fontSize = 11.sp
                 )

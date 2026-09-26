@@ -63,15 +63,15 @@ data class NotificationLogEntity(
     val isRead: Boolean = false
 )
 
-@Entity(tableName = "onesignal_settings")
-data class OneSignalSettingsEntity(
+@Entity(tableName = "notification_settings")
+data class NotificationSettingsEntity(
     @PrimaryKey val id: Int = 1,
     val pushEnabled: Boolean = true,
     val caffeineAlert: Boolean = true,
     val luxAlert: Boolean = true,
     val windDownAlert: Boolean = true,
-    val appId: String = "protocol_circadian_channel",
-    val playerId: String = "",
+    val channelId: String = "protocol_circadian_channel",
+    val notificationId: String = "",
     val lastCampaignSent: String? = null
 )
 

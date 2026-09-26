@@ -164,7 +164,7 @@ class RevenueCatManager {
     }
 
     private fun configureRevenueCat(context: Context, apiKey: String) {
-        Purchases.logLevel = LogLevel.DEBUG
+        Purchases.logLevel = if (com.example.BuildConfig.DEBUG) LogLevel.DEBUG else LogLevel.WARN
         Purchases.configure(
             PurchasesConfiguration.Builder(context.applicationContext, apiKey).build()
         )
@@ -370,6 +370,9 @@ class RevenueCatManager {
     // Optional delegate hook allowing unit tests to simulate purchase execution with exact package matching
     var purchaseResolverForTesting: (suspend (String) -> PurchaseResult?)? = null
 
+    // Optional delegate hook allowing unit tests to simulate restore execution
+    var restoreResolverForTesting: (suspend () -> PurchaseResult?)? = null
+
     // Allows unit tests to provide mock remote offerings
     fun setRemoteOfferingsForTesting(offerings: Offerings?) {
         _remoteOfferings.value = offerings
@@ -535,6 +538,17 @@ class RevenueCatManager {
     suspend fun restorePurchases(): PurchaseResult {
         _isPurchasing.value = true
         _lastError.value = null
+
+        restoreResolverForTesting?.let { testResolver ->
+            val result = testResolver.invoke()
+            if (result != null) {
+                if (result is PurchaseResult.Error) {
+                    _lastError.value = result.message
+                }
+                _isPurchasing.value = false
+                return result
+            }
+        }
 
         if (!Purchases.isConfigured || !_isLiveConnected.value) {
             val errorMsg = "Google Play Billing / RevenueCat is not configured. Cannot restore purchases."

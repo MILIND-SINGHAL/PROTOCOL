@@ -3,12 +3,13 @@ package com.example.viewmodel
 import android.app.Activity
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.BuildConfig
 import com.example.data.firebase.FirebaseSyncStatus
 import com.example.data.local.NotificationLogEntity
-import com.example.data.local.OneSignalSettingsEntity
+import com.example.data.local.NotificationSettingsEntity
 import com.example.data.local.ProtocolDatabase
 import com.example.data.local.ProtocolRepository
 import com.example.data.local.UserProfileEntity
@@ -51,19 +52,19 @@ data class CircadianState(
     val caffeineRule: CircadianTimingRule = CircadianTimingRule(
         title = "Caffeine Intake Window",
         ruleFormula = "Wake time + 90 min (configurable offset)",
-        scientificReason = "Allows natural adenosine clearance to prevent afternoon fatigue crashes.",
+        scientificReason = "Supports natural morning adenosine clearance before caffeine intake, which may help reduce afternoon energy dips.",
         confidenceLevel = "General guidance"
     ),
     val lightRule: CircadianTimingRule = CircadianTimingRule(
         title = "Morning Sunlight Window",
         ruleFormula = "Wake time + 60 min (configurable offset)",
-        scientificReason = "Supports a consistent morning routine and entrains the central circadian clock.",
+        scientificReason = "Supports a consistent morning routine and natural light exposure to help set your daily circadian rhythms.",
         confidenceLevel = "General guidance"
     ),
     val windDownRule: CircadianTimingRule = CircadianTimingRule(
         title = "Evening Wind-Down",
         ruleFormula = "Wake time + 14 hours (configurable offset)",
-        scientificReason = "Prepares nervous system for nocturnal melatonin synthesis and core temperature drop.",
+        scientificReason = "Prepares the body for rest and supports natural evening melatonin onset before sleep.",
         confidenceLevel = "General guidance"
     )
 )
@@ -73,23 +74,26 @@ data class AccountDeletionResult(
     val isLocalWipeSuccess: Boolean,
     val isSubscriptionReset: Boolean,
     val isNotificationReset: Boolean,
-    val message: String
-)
+    val message: String,
+    val requiresReauth: Boolean = false
+) {
+    val isFullyDeleted: Boolean get() = isRemoteSuccess && isLocalWipeSuccess && isSubscriptionReset && isNotificationReset
+}
 
 class ProtocolViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository: ProtocolRepository
     val revenueCatManager = RevenueCatManager()
     val notificationManager: ProtocolNotificationManager
-    val oneSignalManager: ProtocolNotificationManager get() = notificationManager
     val firebaseManager = com.example.data.firebase.FirebaseManager(application)
 
     val userProfile: StateFlow<UserProfileEntity?>
     val sessionState: StateFlow<UserSessionState>
     val todayCompleted: StateFlow<Set<String>>
     val notificationLogs: StateFlow<List<NotificationLogEntity>>
-    val oneSignalSettings: StateFlow<OneSignalSettingsEntity?>
+    val notificationSettings: StateFlow<NotificationSettingsEntity?>
     val realStreak: StateFlow<Int>
+    val longestStreak: StateFlow<Int>
     val allCompletedDates: StateFlow<List<String>>
     val adaptiveProtocolState: StateFlow<com.example.data.adaptive.AdaptiveProtocolState>
 
@@ -147,10 +151,13 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
         notificationLogs = repository.notificationLogsFlow
             .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-        oneSignalSettings = repository.oneSignalSettingsFlow
+        notificationSettings = repository.notificationSettingsFlow
             .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
         realStreak = repository.realStreakFlow
+            .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+
+        longestStreak = repository.longestStreakFlow
             .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
         allCompletedDates = repository.allCompletedDatesFlow
@@ -201,7 +208,7 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
                         lightOffset = profile.lightWindowMinutes,
                         windDownOffset = profile.windDownHours
                     )
-                    oneSignalManager.syncCircadianTags(
+                    notificationManager.syncCircadianTags(
                         wakeTime = profile.wakeTime,
                         focus = profile.focus,
                         completedCount = todayCompleted.value.size,
@@ -282,19 +289,19 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
             caffeineRule = CircadianTimingRule(
                 title = "Caffeine Intake Window",
                 ruleFormula = "Wake time + ${caffeineOffset}m offset",
-                scientificReason = "Allows natural adenosine clearance to prevent afternoon fatigue crashes.",
+                scientificReason = "Supports natural morning adenosine clearance before caffeine intake, which may help reduce afternoon energy dips.",
                 confidenceLevel = "General guidance"
             ),
             lightRule = CircadianTimingRule(
                 title = "Morning Sunlight Window",
                 ruleFormula = "Wake time + ${lightOffset}m offset",
-                scientificReason = "Supports a consistent morning routine and entrains the central circadian clock.",
+                scientificReason = "Supports a consistent morning routine and natural light exposure to help set your daily circadian rhythms.",
                 confidenceLevel = "General guidance"
             ),
             windDownRule = CircadianTimingRule(
                 title = "Evening Wind-Down",
                 ruleFormula = "Wake time + ${windDownOffset}h offset",
-                scientificReason = "Prepares nervous system for nocturnal melatonin synthesis and core temperature drop.",
+                scientificReason = "Prepares the body for rest and supports natural evening melatonin onset before sleep.",
                 confidenceLevel = "General guidance"
             )
         )
@@ -503,7 +510,7 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
     fun saveBaseline(wakeTime: String, focus: String, wearable: String) {
         viewModelScope.launch {
             repository.saveBaseline(wakeTime, focus, wearable)
-            oneSignalManager.setTags(
+            notificationManager.setTags(
                 mapOf(
                     "wake_time" to wakeTime,
                     "focus_outcome" to focus,
@@ -518,7 +525,7 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
     fun updateFocus(newFocus: String) {
         viewModelScope.launch {
             repository.updateFocus(newFocus)
-            oneSignalManager.setTags(mapOf("focus_outcome" to newFocus))
+            notificationManager.setTags(mapOf("focus_outcome" to newFocus))
         }
     }
 
@@ -546,7 +553,7 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
             val plan = if (isProActive) (proEntitlement?.productIdentifier ?: "pro") else "free"
 
             repository.setSubscription(isPro = isProActive, plan = plan)
-            oneSignalManager.setTags(
+            notificationManager.setTags(
                 mapOf(
                     "tier" to if (isProActive) "pro" else "free",
                     "plan" to plan
@@ -596,7 +603,7 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
     fun resetSubscriptionToFree() {
         viewModelScope.launch {
             repository.setSubscription(isPro = false, plan = "free")
-            oneSignalManager.setTags(mapOf("tier" to "free"))
+            notificationManager.setTags(mapOf("tier" to "free"))
         }
     }
 
@@ -614,14 +621,14 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
     fun updateWearable(wearable: String) {
         viewModelScope.launch {
             repository.updateWearable(wearable)
-            oneSignalManager.setTags(mapOf("wearable_telemetry_source" to wearable))
+            notificationManager.setTags(mapOf("wearable_telemetry_source" to wearable))
         }
     }
 
     fun updateWakeTime(wakeTime: String) {
         viewModelScope.launch {
             repository.updateWakeTime(wakeTime)
-            oneSignalManager.setTags(mapOf("wake_time" to wakeTime))
+            notificationManager.setTags(mapOf("wake_time" to wakeTime))
         }
     }
 
@@ -689,14 +696,14 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
                 userId = canonicalUid,
                 wakeTime = profile?.wakeTime ?: "06:30",
                 focusGoal = profile?.focus ?: "Energy",
-                streakDays = profile?.streakDays ?: 1,
+                streakDays = realStreak.value,
                 completedItems = completed
             )
             onResult(res.status, res.message)
         }
     }
 
-    fun triggerOneSignalCampaign(campaign: NotificationCampaign) {
+    fun triggerNotificationCampaign(campaign: NotificationCampaign) {
         viewModelScope.launch {
             notificationManager.triggerCampaign(campaign)
         }
@@ -710,16 +717,9 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
         notificationManager.dismissInAppMessage()
         if (iam.actionRoute == "COMPLETE" && !iam.targetTaskId.isNullOrBlank()) {
             viewModelScope.launch {
-                val db = ProtocolDatabase.getDatabase(getApplication())
-                val today = repository.getTodayKey()
-                val profile = repository.getUserProfile()
-                com.example.data.notification.NotificationTaskValidator.validateAndComplete(
-                    dao = db.protocolDao(),
+                repository.completeItemAuthoritatively(
                     taskId = iam.targetTaskId,
-                    taskTitle = iam.title,
-                    targetDateKey = today,
-                    targetUserId = profile?.firebaseUid ?: "local",
-                    currentDateKey = today
+                    taskTitle = iam.title
                 )
             }
         }
@@ -737,17 +737,20 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
 
     /**
      * Requirement 24: Explicit, atomic multi-layer account deletion.
+     * Guarantees that remote deletion succeeds before clearing local data, or accurately reports errors.
      * 1. Remote Firestore document + Firebase Auth user deletion.
      * 2. Local Room cache wipe (completions, notifications, profile reset).
      * 3. RevenueCat subscription identity reset.
      * 4. Notification tags & in-app state reset.
+     * 5. Session clear and navigation to Auth.
      */
     suspend fun deleteAccountPermanently(): AccountDeletionResult {
-        // 1. Remote deletion with fallback local wipe hook
+        val currentUser = firebaseManager.currentUser
+        val isAuthUser = currentUser != null
+
+        // 1. Remote Firebase account deletion (without passing local cleanup as error fallback)
         val remoteResult = try {
-            firebaseManager.deleteAccount(onLocalCleanup = {
-                repository.wipeAllUserData()
-            })
+            firebaseManager.deleteAccount(onLocalCleanup = null)
         } catch (e: Exception) {
             com.example.data.firebase.FirebaseSyncResult(
                 status = com.example.data.firebase.FirebaseSyncStatus.ERROR,
@@ -755,33 +758,84 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
             )
         }
 
-        // 2. Explicit local repository wipe
-        repository.wipeAllUserData()
+        // Critical failure guard: If an authenticated Firebase user existed and remote deletion failed, stop!
+        if (isAuthUser && remoteResult.status == com.example.data.firebase.FirebaseSyncStatus.ERROR) {
+            val requiresReauth = remoteResult.message.contains("Re-authentication", ignoreCase = true) ||
+                    remoteResult.message.contains("recent", ignoreCase = true)
+            return AccountDeletionResult(
+                isRemoteSuccess = false,
+                isLocalWipeSuccess = false,
+                isSubscriptionReset = false,
+                isNotificationReset = false,
+                requiresReauth = requiresReauth,
+                message = "Account deletion could not be completed. ${remoteResult.message}"
+            )
+        }
+
+        // 2. Explicit local Room repository wipe
+        val localWipeSuccess = try {
+            repository.wipeAllUserData()
+            true
+        } catch (e: Exception) {
+            Log.e("ProtocolViewModel", "Local wipe error during deletion", e)
+            false
+        }
 
         // 3. Reset RevenueCat subscription identity
-        revenueCatManager.resetUserIdentity()
+        val subResetSuccess = try {
+            revenueCatManager.resetUserIdentity()
+            true
+        } catch (e: Exception) {
+            Log.e("ProtocolViewModel", "RevenueCat reset error during deletion", e)
+            false
+        }
 
-        // 4. Reset Notification tags and in-app states
-        notificationManager.resetIdentityAndTags()
+        // 4. Cancel Notification alarms/alerts and reset tags & in-app states
+        val notifResetSuccess = try {
+            notificationManager.cancelAllNotifications(getApplication())
+            notificationManager.resetIdentityAndTags()
+            true
+        } catch (e: Exception) {
+            Log.e("ProtocolViewModel", "Notification reset error during deletion", e)
+            false
+        }
 
-        // 5. Navigate to auth (account no longer exists)
+        // 5. Navigate to auth and clear active session & subscription cache
+        firebaseManager.signOut()
         _isGuestSession.value = false
+        repository.setSubscription(false, "FREE")
         _appNavState.value = AppNavDestination.Auth.route
 
-        return AccountDeletionResult(
-            isRemoteSuccess = remoteResult.status == com.example.data.firebase.FirebaseSyncStatus.REAL_SUCCESS,
-            isLocalWipeSuccess = true,
-            isSubscriptionReset = true,
-            isNotificationReset = true,
-            message = if (remoteResult.status == com.example.data.firebase.FirebaseSyncStatus.REAL_SUCCESS)
+        val isRemoteSuccess = if (isAuthUser) remoteResult.status == com.example.data.firebase.FirebaseSyncStatus.REAL_SUCCESS else true
+        val isFullyDeleted = isRemoteSuccess && localWipeSuccess && subResetSuccess && notifResetSuccess
+
+        val message = when {
+            isFullyDeleted && isAuthUser ->
                 "Account permanently deleted across Cloud Firestore, Firebase Auth, RevenueCat, and local device storage."
-            else
-                "Local database, RevenueCat session, and notification tags wiped. Remote status: ${remoteResult.message}"
+            isFullyDeleted && !isAuthUser ->
+                "Local guest account session, data, and notification settings reset."
+            !isFullyDeleted && localWipeSuccess ->
+                "Remote account deleted, but cleanup incomplete for: " +
+                        listOfNotNull(
+                            if (!subResetSuccess) "RevenueCat session" else null,
+                            if (!notifResetSuccess) "Notification tags" else null
+                        ).joinToString(", ") + ". Session cleared."
+            else ->
+                "Account deletion encountered an error during local data wipe."
+        }
+
+        return AccountDeletionResult(
+            isRemoteSuccess = isRemoteSuccess,
+            isLocalWipeSuccess = localWipeSuccess,
+            isSubscriptionReset = subResetSuccess,
+            isNotificationReset = notifResetSuccess,
+            requiresReauth = false,
+            message = message
         )
     }
 
-    suspend fun wipeUserData() {
-        deleteAccountPermanently()
+    suspend fun wipeUserData(): AccountDeletionResult {
+        return deleteAccountPermanently()
     }
 
     // --- Authentication & User Session ---
@@ -824,7 +878,7 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
                 syncRevenueCatIdentity(uid)
             }
 
-            oneSignalManager.setTags(
+            notificationManager.setTags(
                 mapOf(
                     "email" to email,
                     "firebase_uid" to (authResult.uid ?: ""),
@@ -877,7 +931,7 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
                 syncRevenueCatIdentity(uid)
             }
 
-            oneSignalManager.setTags(
+            notificationManager.setTags(
                 mapOf(
                     "email" to email,
                     "firebase_uid" to (authResult.uid ?: ""),
@@ -921,7 +975,7 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
                 syncRevenueCatIdentity(uid)
             }
 
-            oneSignalManager.setTags(
+            notificationManager.setTags(
                 mapOf(
                     "email" to (authResult.email ?: ""),
                     "auth_provider" to "google",
@@ -958,7 +1012,7 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
                 syncRevenueCatIdentity(uid)
             }
 
-            oneSignalManager.setTags(
+            notificationManager.setTags(
                 mapOf(
                     "email" to (authResult.email ?: ""),
                     "auth_provider" to "google",
@@ -975,6 +1029,7 @@ class ProtocolViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             firebaseManager.signOut()
             repository.clearActiveUserSession()
+            repository.clearSessionCompletions()
             revenueCatManager.resetUserIdentity()
             _isGuestSession.value = false
             _appNavState.value = AppNavDestination.Auth.route

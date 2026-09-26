@@ -5,15 +5,17 @@
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <!-- Include general user preferences and protocol settings -->
+        <include domain="sharedpref" path="."/>
+        <include domain="database" path="."/>
+        <!-- Exclude sensitive auth credentials, RevenueCat custom API key, and room database -->
+        <exclude domain="sharedpref" path="revenuecat_prefs.xml"/>
+        <exclude domain="database" path="protocol_wellness.db"/>
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <include domain="sharedpref" path="."/>
+        <include domain="database" path="."/>
+        <exclude domain="sharedpref" path="revenuecat_prefs.xml"/>
+        <exclude domain="database" path="protocol_wellness.db"/>
     </device-transfer>
-    -->
 </data-extraction-rules>

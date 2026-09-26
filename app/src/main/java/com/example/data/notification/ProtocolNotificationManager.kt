@@ -6,10 +6,10 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.data.local.ProtocolRepository
-import com.example.data.onesignal.ProtocolNotificationReceiver
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -141,7 +141,7 @@ class ProtocolNotificationManager(
                 "today_completed_count" to completedCount.toString(),
                 "streak_milestone" to "${streakDays}_DAYS",
                 "wearable_source" to wearable,
-                "last_biological_sync" to System.currentTimeMillis().toString()
+                "last_protocol_sync" to System.currentTimeMillis().toString()
             )
         )
     }
@@ -152,6 +152,42 @@ class ProtocolNotificationManager(
 
     fun dismissInAppMessage() {
         _activeInAppMessage.value = null
+    }
+
+    /**
+     * Requirement 24: Cancel all system notifications and scheduled AlarmManager alarms.
+     * Invoked during account deletion.
+     */
+    fun cancelAllNotifications(context: Context) {
+        try {
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            notificationManager?.cancelAll()
+        } catch (e: Exception) {
+            Log.w("ProtocolNotificationManager", "Failed to cancel notifications: ${e.message}")
+        }
+
+        try {
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager
+            if (alarmManager != null) {
+                // Cancel fallback snooze alarms and campaign-scheduled alarm intents
+                val alarmIds = listOf(8888, 500, 501, 502, 503, 1001, 1002, 1003, 1004)
+                for (id in alarmIds) {
+                    val intent = Intent(context, ProtocolNotificationReceiver::class.java)
+                    val pendingIntent = PendingIntent.getBroadcast(
+                        context,
+                        id,
+                        intent,
+                        PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+                    )
+                    if (pendingIntent != null) {
+                        alarmManager.cancel(pendingIntent)
+                        pendingIntent.cancel()
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("ProtocolNotificationManager", "Failed to cancel scheduled alarms: ${e.message}")
+        }
     }
 
     /**
@@ -174,7 +210,7 @@ class ProtocolNotificationManager(
         NotificationCampaign(
             id = "camp_lux",
             title = "☀️ Morning Sunlight Window",
-            message = "Get 10 minutes of direct retinal lux exposure to lock your 14h melatonin clock.",
+            message = "Step outside for 10–15 minutes of natural morning light to anchor your circadian rhythm.",
             category = "circadian",
             triggerType = "0–60m Post-Wake",
             circadianPhase = "CORTISOL_AWAKENING_SPIKE",
@@ -195,8 +231,8 @@ class ProtocolNotificationManager(
         ),
         NotificationCampaign(
             id = "camp_caffeine",
-            title = "☕ 90m Caffeine Lockout Lifted",
-            message = "Adenosine receptors cleared. Your first cup of coffee or matcha is now biologically optimal.",
+            title = "☕ 90m Caffeine Delay Window",
+            message = "Your 90-minute morning delay is complete. You can enjoy your morning coffee or matcha.",
             category = "circadian",
             triggerType = "90m Post-Wake",
             circadianPhase = "DOPAMINE_HIGH_ALERTNESS",
@@ -217,8 +253,8 @@ class ProtocolNotificationManager(
         ),
         NotificationCampaign(
             id = "camp_midday_reset",
-            title = "🧘 10 Min NSDR / Dopamine Reset",
-            message = "Midday energy trough detected. Reload acetylcholine and restore cognitive stamina.",
+            title = "🧘 10 Min NSDR / Midday Reset",
+            message = "Take 10 minutes of non-sleep deep rest to reset mental clarity and restore focus.",
             category = "performance",
             triggerType = "Midday Trough",
             circadianPhase = "ADENOSINE_PLATEAU_ZONE",
@@ -262,7 +298,7 @@ class ProtocolNotificationManager(
         NotificationCampaign(
             id = "camp_streak",
             title = "🔥 3-Day Rhythm Anchored",
-            message = "Your circadian consistency index increased by 28%. Tap to share your execution badge.",
+            message = "You have maintained 3 consecutive days of protocol adherence. Tap to view your badge.",
             category = "engagement",
             triggerType = "Lifecycle Milestone",
             circadianPhase = "RETENTION_JOURNEY",
@@ -280,35 +316,35 @@ class ProtocolNotificationManager(
     val circadianJourneys = listOf(
         CircadianJourney(
             id = "journey_dawn",
-            name = "Dawn Cortisol Awakening",
+            name = "Morning Wake Alignment",
             subtitle = "Circadian Anchor Automation",
-            description = "Sequenced lifecycle journey triggering light exposure, cortisol spike verification, and 90-minute adenosine clearance lockout.",
+            description = "Sequenced morning routine encouraging natural light exposure and a 90-minute caffeine delay.",
             steps = listOf(
-                JourneyStep(1, "Wake Detection", "Trigger: User wake time reached", "Good morning. Initiating Cortisol Awakening sequence.", "tag.circadian_phase = 'CORTISOL_AWAKENING'"),
-                JourneyStep(2, "Sunlight Lux Window", "Delay: +10 min", "☀️ 10 Min Retinal Light Window (Action: Start Timer)", "tag.lux_window = 'ACTIVE'"),
-                JourneyStep(3, "Adenosine Clearance", "Delay: +90 min", "☕ Caffeine Lockout Lifted (Action: Log First Cup)", "tag.caffeine_lockout_status = 'LIFTED'")
+                JourneyStep(1, "Wake Detection", "Trigger: User wake time reached", "Good morning. Initiating morning wake alignment routine.", "tag.circadian_phase = 'CORTISOL_AWAKENING'"),
+                JourneyStep(2, "Sunlight Window", "Delay: +10 min", "☀️ 10 Min Morning Sunlight (Action: Start Timer)", "tag.lux_window = 'ACTIVE'"),
+                JourneyStep(3, "Caffeine Delay Window", "Delay: +90 min", "☕ Morning Caffeine Window Open (Action: Log First Cup)", "tag.caffeine_lockout_status = 'LIFTED'")
             )
         ),
         CircadianJourney(
             id = "journey_midday",
-            name = "Midday Metabolic & Dopamine Reset",
-            subtitle = "Prevent 2:00 PM Crash",
-            description = "Monitors adenosine accumulation and enforces strict 2:00 PM caffeine cutoff while recommending Non-Sleep Deep Rest (NSDR).",
+            name = "Midday Focus & Energy Reset",
+            subtitle = "Support Afternoon Stamina",
+            description = "Scheduled reminder for the 2:00 PM caffeine cutoff and recommended Non-Sleep Deep Rest (NSDR).",
             steps = listOf(
-                JourneyStep(1, "Pre-Cutoff Warning", "Trigger: 1:30 PM", "30 minutes until strict 2:00 PM caffeine cutoff.", "tag.caffeine_warning = 'T_MINUS_30'"),
-                JourneyStep(2, "Hard Lockout Enforced", "Trigger: 2:00 PM", "☕ Caffeine Window Closed. Protect tonight's deep slow-wave delta sleep.", "tag.caffeine_lockout_status = 'ENFORCED'"),
+                JourneyStep(1, "Pre-Cutoff Warning", "Trigger: 1:30 PM", "30 minutes until 2:00 PM caffeine cutoff.", "tag.caffeine_warning = 'T_MINUS_30'"),
+                JourneyStep(2, "Cutoff Reached", "Trigger: 2:00 PM", "☕ Caffeine Window Closed. Supports natural evening sleep readiness.", "tag.caffeine_lockout_status = 'ENFORCED'"),
                 JourneyStep(3, "Autonomic NSDR Prompt", "Trigger: 2:30 PM dip", "🧘 10 Min NSDR Reset (Action: Start NSDR)", "tag.midday_reset = 'COMPLETED'")
             )
         ),
         CircadianJourney(
             id = "journey_dusk",
-            name = "Circadian Dusk & Delta Sleep Prep",
-            subtitle = "Melatonin Protection System",
-            description = "Triggers ambient light reduction, targeted magnesium supplementation, and thermal bedroom cooling for optimal slow-wave sleep.",
+            name = "Evening Wind-Down & Sleep Prep",
+            subtitle = "Rest Routine Support",
+            description = "Encourages ambient light reduction, evening relaxation, and a cooler sleep environment.",
             steps = listOf(
-                JourneyStep(1, "Digital Sunset Cues", "Trigger: 2h pre-bed", "Overhead LED lights off. Zero blue light to allow natural melatonin synthesis.", "tag.melatonin_surge = 'INITIALIZED'"),
-                JourneyStep(2, "Neuromuscular Dosing", "Trigger: 60m pre-bed", "🌙 Targeted Magnesium Dose (Action: Took Magnesium / Box Breathing)", "tag.magnesium_taken = 'TRUE'"),
-                JourneyStep(3, "Sleep Chamber Climate", "Trigger: 30m pre-bed", "❄️ Room Climate 18°C. Core body temperature drop initiated.", "tag.bedroom_temp_set = '18C'")
+                JourneyStep(1, "Digital Sunset Cues", "Trigger: 2h pre-bed", "Dim overhead lighting to support your natural evening wind-down.", "tag.evening_lighting = 'DIMMED'"),
+                JourneyStep(2, "Evening Relaxation Routine", "Trigger: 60m pre-bed", "🌙 Evening Relaxation / Box Breathing (Action: Box Breathing)", "tag.magnesium_taken = 'TRUE'"),
+                JourneyStep(3, "Sleep Environment", "Trigger: 30m pre-bed", "❄️ Prepare a cool sleeping environment (~18°C) to support restful sleep.", "tag.bedroom_prepared = 'TRUE'")
             )
         ),
         CircadianJourney(
@@ -317,7 +353,7 @@ class ProtocolNotificationManager(
             subtitle = "Automated Retention Engine",
             description = "Recognizes daily compliance milestones and shields habits before they slip.",
             steps = listOf(
-                JourneyStep(1, "Morning Stack Complete", "Trigger: All morning items done", "⚡ Morning Ignition 100% Locked. Cognitive momentum is primed.", "tag.morning_compliance = '100%'"),
+                JourneyStep(1, "Morning Stack Complete", "Trigger: All morning items done", "⚡ Morning Stack 100% Complete. Ready for focused work.", "tag.morning_compliance = '100%'"),
                 JourneyStep(2, "Milestone Reward", "Trigger: 3rd consecutive day", "🔥 3-Day Rhythm Anchored! VIP executive badge unlocked.", "tag.streak_tier = 'CHAMPION'"),
                 JourneyStep(3, "Streak Rescue Alert", "Trigger: Evening inactivity", "Your 3-day rhythm is at risk. 2 minutes to complete your evening stack.", "tag.streak_shield = 'ENGAGED'")
             )

@@ -39,7 +39,7 @@ import com.example.data.notification.InAppNotificationMessage
 import com.example.ui.theme.ProtocolTheme
 
 @Composable
-fun OneSignalInAppMessageBanner(
+fun ProtocolInAppMessageBanner(
     message: InAppNotificationMessage?,
     onActionClick: (InAppNotificationMessage) -> Unit,
     onDismiss: () -> Unit,

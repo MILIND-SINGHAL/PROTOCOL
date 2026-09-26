@@ -129,6 +129,7 @@ class FirebaseAuthOfflineModeTest {
         suspend fun signOut() {
             simulatedFirebaseCurrentUserUid = null
             repository.clearActiveUserSession()
+            repository.clearSessionCompletions()
             revenueCatLoggedInUid = null
             revenueCatResetCount++
             _isGuestSession.value = false
@@ -137,7 +138,7 @@ class FirebaseAuthOfflineModeTest {
 
         suspend fun resolveStartupDestination(allowGuest: Boolean = false) {
             repository.ensureInitialized()
-            val profile = repository.getUserProfile()
+            var profile = repository.getUserProfile()
             val firebaseUserUid = simulatedFirebaseCurrentUserUid
 
             if (firebaseUserUid != null && profile?.firebaseUid != firebaseUserUid) {
@@ -147,9 +148,11 @@ class FirebaseAuthOfflineModeTest {
                     displayName = profile?.displayName,
                     isEmailVerified = profile?.isEmailVerified ?: false
                 )
+                profile = repository.getUserProfile()
             } else if (firebaseUserUid == null && profile?.firebaseUid != null) {
                 // Clear any legacy or orphaned UID when no real Firebase user is active
                 repository.clearActiveUserSession()
+                profile = repository.getUserProfile()
             }
 
             val hasRealAuthenticatedSession = firebaseUserUid != null &&
@@ -398,10 +401,10 @@ class FirebaseAuthOfflineModeTest {
         // Guest user can toggle habit items in Room
         val initialCompletions = database.protocolDao().getCompletionsForDate(repository.getTodayKey())
         assertEquals(0, initialCompletions.size)
-        repository.toggleItem("habit_sunlight")
+        repository.toggleItem("sleep_sunlight")
         val completionsAfter = database.protocolDao().getCompletionsForDate(repository.getTodayKey())
         assertEquals(1, completionsAfter.size)
-        assertEquals("habit_sunlight", completionsAfter.first().itemId)
+        assertEquals("sleep_sunlight", completionsAfter.first().itemId)
         assertTrue(completionsAfter.first().isCompleted)
 
         // Verify user is STILL OFFLINE_GUEST and NEVER became AUTHENTICATED
@@ -468,5 +471,122 @@ class FirebaseAuthOfflineModeTest {
         assertTrue("REAL_SUCCESS must evaluate to isRealSuccess = true", realSuccess.isRealSuccess)
         assertFalse("REAL_SUCCESS must not evaluate to isOfflineMode = true", realSuccess.isOfflineMode)
         assertFalse("REAL_SUCCESS must not evaluate to isError = true", realSuccess.isError)
+    }
+
+    /**
+     * TEST 11: Email verification cannot be fabricated through local state.
+     */
+    @Test
+    fun test11_EmailVerificationCannotBeFabricatedViaLocalState() = runBlocking {
+        // Attempting to set an email verified state with a null or invalid Firebase UID must NOT retain verified status
+        repository.setActiveUserSession(
+            firebaseUid = null,
+            email = "unverified@protocol.app",
+            displayName = "Offline",
+            isEmailVerified = true // Attempting to inject fake local verification
+        )
+
+        val profile = repository.getUserProfile()
+        assertFalse("Email verification must be false when no valid Firebase UID is present", profile?.isEmailVerified ?: false)
+    }
+
+    /**
+     * TEST 12: Account switching does not leak previous user's completions or data.
+     */
+    @Test
+    fun test12_AccountSwitchingDoesNotLeakPreviousUserData() = runBlocking {
+        val coordinator = TestSessionCoordinator(repository)
+
+        // User A signs in and completes tasks
+        val userAResult = FirebaseSyncResult(
+            status = FirebaseSyncStatus.REAL_SUCCESS,
+            message = "Signed in",
+            uid = "firebase_user_A_111",
+            email = "userA@protocol.app",
+            isEmailVerified = true
+        )
+        coordinator.handleAuthResult(userAResult) { _, _ -> }
+        repository.toggleItem("sleep_sunlight")
+        repository.toggleItem("sleep_delay_caffeine")
+
+        val userACompletions = database.protocolDao().getCompletionsForDate(repository.getTodayKey())
+        assertEquals(2, userACompletions.size)
+
+        // User A logs out
+        coordinator.signOut()
+        val postLogoutCompletions = database.protocolDao().getCompletionsForDate(repository.getTodayKey())
+        assertEquals(0, postLogoutCompletions.size)
+
+        // User B signs in
+        val userBResult = FirebaseSyncResult(
+            status = FirebaseSyncStatus.REAL_SUCCESS,
+            message = "Signed in",
+            uid = "firebase_user_B_222",
+            email = "userB@protocol.app",
+            isEmailVerified = true
+        )
+        coordinator.handleAuthResult(userBResult) { _, _ -> }
+
+        val userBProfile = repository.getUserProfile()
+        assertEquals("firebase_user_B_222", userBProfile?.firebaseUid)
+        assertEquals("userB@protocol.app", userBProfile?.email)
+
+        // User B has fresh empty completions
+        val userBCompletions = database.protocolDao().getCompletionsForDate(repository.getTodayKey())
+        assertEquals("User B must not see User A's habit completions", 0, userBCompletions.size)
+    }
+
+    /**
+     * TEST 13: Startup with legitimate Firebase cached authentication restores correctly.
+     */
+    @Test
+    fun test13_StartupWithLegitimateCachedFirebaseUserRestoresSession() = runBlocking {
+        val coordinator = TestSessionCoordinator(repository)
+
+        // Pre-populate baseline in Room
+        repository.saveBaseline(wakeTime = "06:30", focus = "Deep Sleep", wearable = "None")
+
+        // Simulate Firebase Auth returning a cached currentUser from disk
+        coordinator.simulatedFirebaseCurrentUserUid = "firebase_cached_uid_789"
+
+        coordinator.resolveStartupDestination(allowGuest = false)
+
+        val profile = repository.getUserProfile()
+        assertEquals("firebase_cached_uid_789", profile?.firebaseUid)
+        assertEquals(UserSessionState.AUTHENTICATED, coordinator.getSessionState(profile?.firebaseUid))
+        assertEquals(AppNavDestination.Dashboard.route, coordinator.appNavState.value)
+    }
+
+    /**
+     * TEST 14: Startup with no Firebase user does not create an account.
+     */
+    @Test
+    fun test14_StartupWithNoFirebaseUserDoesNotCreateAccount() = runBlocking {
+        val coordinator = TestSessionCoordinator(repository)
+
+        // No Firebase user on device
+        coordinator.simulatedFirebaseCurrentUserUid = null
+
+        coordinator.resolveStartupDestination(allowGuest = false)
+
+        val profile = repository.getUserProfile()
+        assertNull("Startup with no Firebase user must have null firebaseUid", profile?.firebaseUid)
+        assertEquals(UserSessionState.UNAUTHENTICATED, coordinator.getSessionState(profile?.firebaseUid))
+        assertEquals(AppNavDestination.Auth.route, coordinator.appNavState.value)
+    }
+
+    /**
+     * TEST 15: RevenueCat never receives fake, email, or generated UIDs.
+     */
+    @Test
+    fun test15_RevenueCatRejectsFabricatedUids() = runBlocking {
+        val revenueCatManager = RevenueCatManager()
+        val emailUid = "test@example.com"
+        val googPrefixUid = "goog_test@example.com"
+        val blankUid = "   "
+
+        assertNull("RevenueCat must reject email as UID", revenueCatManager.syncRevenueCatIdentity(emailUid))
+        assertNull("RevenueCat must reject 'goog_' prefix as UID", revenueCatManager.syncRevenueCatIdentity(googPrefixUid))
+        assertNull("RevenueCat must reject blank string as UID", revenueCatManager.syncRevenueCatIdentity(blankUid))
     }
 }

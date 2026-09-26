@@ -1,4 +1,4 @@
-package com.example.data.onesignal
+package com.example.data.notification
 
 import android.app.AlarmManager
 import android.app.NotificationChannel
@@ -16,6 +16,7 @@ import com.example.MainActivity
 import com.example.data.local.NotificationLogEntity
 import com.example.data.local.ProtocolCompletionEntity
 import com.example.data.local.ProtocolDatabase
+import com.example.data.local.ProtocolRepository
 import com.example.data.notification.NotificationTaskValidator
 import com.example.data.notification.NotificationValidationResult
 import com.example.data.notification.ProtocolNotificationManager
@@ -92,14 +93,12 @@ class ProtocolNotificationReceiver : BroadcastReceiver() {
 
         when (intent.action) {
             ACTION_COMPLETE_TASK -> {
-                val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
-                val result = NotificationTaskValidator.validateAndComplete(
-                    dao = dao,
+                val repo = ProtocolRepository(dao)
+                val result = repo.completeItemAuthoritatively(
                     taskId = taskId,
                     taskTitle = taskTitle,
                     targetDateKey = dateKey,
-                    targetUserId = userId,
-                    currentDateKey = today
+                    targetUserId = userId
                 )
 
                 try {
@@ -143,7 +142,15 @@ class ProtocolNotificationReceiver : BroadcastReceiver() {
                 )
 
                 if (alarmManager != null) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        // API 31+: Must check canScheduleExactAlarms() before using exact alarms
+                        if (alarmManager.canScheduleExactAlarms()) {
+                            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, snoozeTimeMs, pendingSnoozeIntent)
+                        } else {
+                            // Graceful fallback: use inexact alarm window (±2 min)
+                            alarmManager.setWindow(AlarmManager.RTC_WAKEUP, snoozeTimeMs, 2 * 60 * 1000L, pendingSnoozeIntent)
+                        }
+                    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                         alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, snoozeTimeMs, pendingSnoozeIntent)
                     } else {
                         alarmManager.set(AlarmManager.RTC_WAKEUP, snoozeTimeMs, pendingSnoozeIntent)

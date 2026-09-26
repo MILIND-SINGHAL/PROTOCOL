@@ -47,15 +47,20 @@ object SecurityIntegrityManager {
     private const val EXPECTED_PACKAGE_NAME = "com.aistudio.protocol.wellness"
 
     /**
-     * Requirement 20: Trusted certificate SHA-256 digests (uppercase hex without colons).
-     * Establishes cryptographic trust by comparing actual signing certificates against expected digests.
+     * Requirement 20 & Release Hardening:
+     * Differentiates trusted certificate SHA-256 digests by build type.
+     * The production release build only trusts the official release signing key.
+     * The debug keystore is strictly restricted to development/debug builds.
      */
-    val EXPECTED_CERTIFICATE_DIGESTS: Set<String> = setOf(
-        // Protocol Official Production Release Key
-        "B412F84973C25971A16689E2844521CD88935A6194021180FF23AA894CE19243",
-        // Local Android SDK Debug Keystore Key (Used in development & test runners)
-        "24EA989E836653F7E2245C7D5218DF1360CB338B68DC5790C7456673C9DC14E3"
-    )
+    const val RELEASE_CERTIFICATE_DIGEST = "B412F84973C25971A16689E2844521CD88935A6194021180FF23AA894CE19243"
+    const val DEBUG_CERTIFICATE_DIGEST = "24EA989E836653F7E2245C7D5218DF1360CB338B68DC5790C7456673C9DC14E3"
+
+    val EXPECTED_CERTIFICATE_DIGESTS: Set<String>
+        get() = if (com.example.BuildConfig.DEBUG) {
+            setOf(RELEASE_CERTIFICATE_DIGEST, DEBUG_CERTIFICATE_DIGEST)
+        } else {
+            setOf(RELEASE_CERTIFICATE_DIGEST)
+        }
 
     private val KNOWN_ROOT_PATHS = listOf(
         "/system/app/Superuser.apk",

@@ -4,7 +4,6 @@ import com.example.data.adaptive.AdaptiveEngine
 import com.example.data.local.NotificationLogEntity
 import com.example.data.local.ProtocolCompletionEntity
 import com.example.data.local.ProtocolDao
-import com.example.data.onesignal.ProtocolNotificationReceiver
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale

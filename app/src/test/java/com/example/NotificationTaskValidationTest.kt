@@ -9,7 +9,7 @@ import com.example.data.local.ProtocolRepository
 import com.example.data.local.UserProfileEntity
 import com.example.data.notification.NotificationTaskValidator
 import com.example.data.notification.NotificationValidationResult
-import com.example.data.onesignal.ProtocolNotificationReceiver
+import com.example.data.notification.ProtocolNotificationReceiver
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -468,5 +468,121 @@ class NotificationTaskValidationTest {
         val rejected = impersonatingResult as NotificationValidationResult.Rejected
         assertEquals("USER_MISMATCH", rejected.reasonCode)
         assertEquals("No second completion recorded", 1, dao.getCompletionsForDate(todayDateKey).size)
+    }
+
+    /**
+     * TEST 13: Shared Authoritative Completion Path
+     * -> UI and notification actions share the exact same completion pipeline via repository.completeItemAuthoritatively().
+     */
+    @Test
+    fun test13_UIAndNotificationShareAuthoritativeCompletionPath() = runBlocking {
+        val dao = database.protocolDao()
+        dao.insertOrUpdateUserProfile(
+            UserProfileEntity(
+                id = 1,
+                focus = "Deep Sleep",
+                firebaseUid = "user_shared"
+            )
+        )
+
+        // 1. UI completion via repository.toggleItem()
+        repository.toggleItem("sleep_sunlight")
+        val completions = dao.getCompletionsForDate(todayDateKey)
+        assertEquals(1, completions.size)
+        assertTrue(completions.first().isCompleted)
+
+        // 2. Notification action attempts to complete the same item
+        val notifResult = repository.completeItemAuthoritatively(
+            taskId = "sleep_sunlight",
+            targetDateKey = todayDateKey,
+            targetUserId = "user_shared"
+        )
+        assertTrue("Notification completion recognizes already completed task", notifResult is NotificationValidationResult.AlreadyCompleted)
+        assertEquals("Completions count remains exactly 1", 1, dao.getCompletionsForDate(todayDateKey).size)
+    }
+
+    /**
+     * TEST 14: Account Switch Data Isolation
+     * -> Old user's notification intent cannot mutate new user's active session or completions.
+     */
+    @Test
+    fun test14_AccountSwitch_OldNotificationCannotMutateNewUserData() = runBlocking {
+        val dao = database.protocolDao()
+
+        // User A was logged in when notification was scheduled
+        repository.setActiveUserSession(
+            firebaseUid = "user_A_uid",
+            email = "userA@protocol.app",
+            displayName = "User A",
+            isEmailVerified = true
+        )
+
+        val oldNotificationIntent = Intent(ProtocolNotificationReceiver.ACTION_COMPLETE_TASK).apply {
+            putExtra(ProtocolNotificationReceiver.EXTRA_TASK_ID, "sleep_sunlight")
+            putExtra(ProtocolNotificationReceiver.EXTRA_TASK_TITLE, "Morning Sunlight")
+            putExtra(ProtocolNotificationReceiver.EXTRA_DATE_KEY, todayDateKey)
+            putExtra(ProtocolNotificationReceiver.EXTRA_USER_ID, "user_A_uid")
+        }
+
+        // User A logs out and User B logs in
+        repository.clearActiveUserSession()
+        repository.clearSessionCompletions()
+
+        repository.setActiveUserSession(
+            firebaseUid = "user_B_uid",
+            email = "userB@protocol.app",
+            displayName = "User B",
+            isEmailVerified = true
+        )
+
+        // Old User A notification is received
+        val receiver = ProtocolNotificationReceiver()
+        receiver.handleIntent(context, oldNotificationIntent)
+
+        val userBCompletions = dao.getCompletionsForDate(todayDateKey)
+        assertEquals("User B data must NOT be modified by User A notification", 0, userBCompletions.size)
+    }
+
+    /**
+     * TEST 15: Notification completion directly feeds the authoritative Daily Adherence & Streak
+     * -> Exactly matches UI completion calculations with no divergence.
+     */
+    @Test
+    fun test15_NotificationCompletion_UpdatesDailyAdherenceAndStreakAuthoritatively() = runBlocking {
+        val dao = database.protocolDao()
+        dao.insertOrUpdateUserProfile(
+            UserProfileEntity(
+                id = 1,
+                focus = "Physical Recovery",
+                firebaseUid = "user_adherence"
+            )
+        )
+
+        val requiredTasks = com.example.data.adaptive.AdaptiveEngine.getRequiredItemsForTrack("Physical Recovery")
+        assertEquals(8, requiredTasks.size)
+
+        // Complete 7 out of 8 tasks via notification action
+        val tasksToComplete = requiredTasks.take(7)
+        tasksToComplete.forEach { taskId ->
+            val result = repository.completeItemAuthoritatively(
+                taskId = taskId,
+                targetDateKey = todayDateKey,
+                targetUserId = "user_adherence"
+            )
+            assertTrue(result is NotificationValidationResult.Success)
+        }
+
+        val completedSet = dao.getCompletionsForDate(todayDateKey).filter { it.isCompleted }.map { it.itemId }.toSet()
+        assertEquals(7, completedSet.size)
+
+        // Summarize day adherence through AdaptiveEngine
+        val daySummary = com.example.data.adaptive.AdaptiveEngine.summarizeDay(
+            dateKey = todayDateKey,
+            completedItemIds = completedSet,
+            requiredItems = requiredTasks
+        )
+
+        assertEquals(0.875f, daySummary.adherenceRatio)
+        assertTrue("7/8 is 87.5% which qualifies for streak (>= 80%)", daySummary.isStreakQualified)
     }
 }

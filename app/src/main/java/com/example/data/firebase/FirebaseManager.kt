@@ -124,13 +124,17 @@ class FirebaseManager(private val context: Context) {
             val auth = FirebaseAuth.getInstance()
             val result = auth.signInWithEmailAndPassword(email.trim(), password.trim()).await()
             val user = result.user
+            val uid = user?.uid
+            if (user == null || uid.isNullOrBlank()) {
+                throw IllegalStateException("Firebase user or UID is null/blank after signIn.")
+            }
             FirebaseSyncResult(
                 status = FirebaseSyncStatus.REAL_SUCCESS,
-                message = "Signed in as ${user?.email ?: email}.",
-                uid = user?.uid,
-                email = user?.email ?: email.trim(),
-                displayName = user?.displayName ?: email.substringBefore("@").replaceFirstChar { it.uppercase() },
-                isEmailVerified = user?.isEmailVerified ?: false
+                message = "Signed in as ${user.email ?: email}.",
+                uid = uid,
+                email = user.email ?: email.trim(),
+                displayName = user.displayName ?: email.substringBefore("@").replaceFirstChar { it.uppercase() },
+                isEmailVerified = user.isEmailVerified
             )
         } catch (e: Exception) {
             Log.e(TAG, "Firebase signIn failed", e)
@@ -160,7 +164,11 @@ class FirebaseManager(private val context: Context) {
             val auth = FirebaseAuth.getInstance()
             val result = auth.createUserWithEmailAndPassword(email.trim(), password.trim()).await()
             val user = result.user
-            if (name.isNotBlank() && user != null) {
+            val uid = user?.uid
+            if (user == null || uid.isNullOrBlank()) {
+                throw IllegalStateException("Firebase user or UID is null/blank after signUp.")
+            }
+            if (name.isNotBlank()) {
                 try {
                     val profileUpdates = com.google.firebase.auth.UserProfileChangeRequest.Builder()
                         .setDisplayName(name.trim())
@@ -172,7 +180,7 @@ class FirebaseManager(private val context: Context) {
             }
             var emailSent = false
             try {
-                user?.sendEmailVerification()?.await()
+                user.sendEmailVerification().await()
                 emailSent = true
             } catch (ve: Exception) {
                 Log.w(TAG, "Verification email note: ${ve.message}")
@@ -181,9 +189,9 @@ class FirebaseManager(private val context: Context) {
             FirebaseSyncResult(
                 status = FirebaseSyncStatus.REAL_SUCCESS,
                 message = "Account created.$verificationNote Please check your inbox and tap the link to verify.",
-                uid = user?.uid,
-                email = user?.email ?: email.trim(),
-                displayName = if (name.isNotBlank()) name else (user?.displayName ?: email.substringBefore("@").replaceFirstChar { it.uppercase() }),
+                uid = uid,
+                email = user.email ?: email.trim(),
+                displayName = if (name.isNotBlank()) name else (user.displayName ?: email.substringBefore("@").replaceFirstChar { it.uppercase() }),
                 isEmailVerified = false
             )
         } catch (e: Exception) {
@@ -439,10 +447,24 @@ class FirebaseManager(private val context: Context) {
     }
 
     /**
+     * Optional testing hook to simulate remote Firebase deletion outcomes
+     * (e.g. success, requires-recent-login, cloud deletion failure, network error).
+     */
+    var deleteAccountResolverForTesting: (suspend () -> FirebaseSyncResult)? = null
+
+    /**
      * Requirement 24: Delete user account, Firestore documents, and invoke local cleanup.
-     * Guarantees that local Room data and session storage are wiped.
+     * Guarantees that remote deletion succeeds before triggering local cleanup.
      */
     suspend fun deleteAccount(onLocalCleanup: (suspend () -> Unit)? = null): FirebaseSyncResult {
+        deleteAccountResolverForTesting?.let { resolver ->
+            val res = resolver.invoke()
+            if (res.status == FirebaseSyncStatus.REAL_SUCCESS || res.status == FirebaseSyncStatus.OFFLINE_MODE) {
+                onLocalCleanup?.invoke()
+            }
+            return res
+        }
+
         if (!isFirebaseInitialized) {
             onLocalCleanup?.invoke()
             return FirebaseSyncResult(
@@ -460,7 +482,9 @@ class FirebaseManager(private val context: Context) {
                     Log.w(TAG, "Firestore doc delete error: ${fe.message}")
                 }
             }
-            user?.delete()?.await()
+            if (user != null) {
+                user.delete().await()
+            }
             onLocalCleanup?.invoke()
             FirebaseSyncResult(
                 status = FirebaseSyncStatus.REAL_SUCCESS,
@@ -468,10 +492,19 @@ class FirebaseManager(private val context: Context) {
             )
         } catch (e: Exception) {
             Log.e(TAG, "Account deletion failed", e)
-            onLocalCleanup?.invoke()
+            val isReauthNeeded = e is com.google.firebase.auth.FirebaseAuthRecentLoginRequiredException ||
+                    (e.message?.contains("recent", ignoreCase = true) == true) ||
+                    (e.message?.contains("re-authenticate", ignoreCase = true) == true) ||
+                    (e.message?.contains("CREDENTIAL_TOO_OLD", ignoreCase = true) == true) ||
+                    (e.message?.contains("requires-recent-login", ignoreCase = true) == true)
+            val msg = if (isReauthNeeded) {
+                "Re-authentication required. Please sign in again before deleting your account."
+            } else {
+                e.localizedMessage ?: "Failed to delete remote account."
+            }
             FirebaseSyncResult(
                 status = FirebaseSyncStatus.ERROR,
-                message = e.localizedMessage ?: "Failed to delete remote account."
+                message = msg
             )
         }
     }
